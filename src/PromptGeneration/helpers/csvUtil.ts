@@ -1,14 +1,9 @@
+import { readTextFile } from "./general";
+
 const ScriptDir = 'scripts';
 
 const UserfilesFolder = 'userfiles';
 const DirectoryfilesFolder = '';
-
-function readTextFile (filepath: string) {
-  return fetch(filepath)
-    .then(response => response.text())
-    .then(text => text)
-    .catch(error => null);
-}
 
 function readContent (
   content: string,
@@ -52,7 +47,7 @@ function readContent (
 
 export async function csv_to_list(
   csvfilename: string,
-  antilist = [],
+  antilist: any[] = [],
   directory="./csvfiles/",
   lowerandstrip=0,
   delimiter=";",
