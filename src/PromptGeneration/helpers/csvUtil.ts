@@ -45,6 +45,27 @@ function readContent (
   return ret;
 }
 
+export function csv_to_list_(obj: {
+  csvfilename: string,
+  antilist: string[],
+  skipheader?: boolean,
+  gender?: string,
+  insanitylevel?: number,
+  delimiter?: string
+}) {
+  return csv_to_list(
+    obj.csvfilename,
+    obj.antilist,
+    './csvfiles/',
+    0,
+    obj.delimiter ?? ';',
+    false,
+    obj.skipheader ?? false,
+    obj.gender ?? "all",
+    obj.insanitylevel ?? -1
+  );
+} 
+
 export async function csv_to_list(
   csvfilename: string,
   antilist: any[] = [],
