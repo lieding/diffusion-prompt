@@ -9,11 +9,7 @@ export class OneButtonPresets {
   CUSTOM_OBP = "Custom...";
   RANDOM_PRESET_OBP = "All (random)...";
 
-  opb_presets: Record<string, any>
-
-  constructor() {
-    this.opb_presets = this.load_obp_presets()
-  }
+  opb_presets: Record<string, any> = {};
 
   async load_obp_presets() {
     const default_data = (await this._load_data(this.DEFAULT_OBP_FILE)) ?? {};
@@ -21,13 +17,17 @@ export class OneButtonPresets {
 
     const newdata = { ...default_data, ...data };
 
+    this.opb_presets = newdata;
+
     // this._save_data(this.OBP_FILE, newdata)
-    return newdata
+    return newdata as Record<string, Record<string, string>>
   }
 
   async _load_data(file_path: string) {
     let content = await readTextFile(file_path);
-    if (!content) file_path = this.DEFAULT_OBP_FILE;
+    if (content)
+      return JSON.parse(content);
+    file_path = this.DEFAULT_OBP_FILE;
     return readTextFile(file_path).then(data => data ? JSON.parse(data) : null);
   }
 

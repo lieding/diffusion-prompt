@@ -51,12 +51,13 @@ export function csv_to_list_(obj: {
   skipheader?: boolean,
   gender?: string,
   insanitylevel?: number,
-  delimiter?: string
+  delimiter?: string,
+  directory?: string,
 }) {
   return csv_to_list(
     obj.csvfilename,
     obj.antilist,
-    './csvfiles/',
+    obj.directory ?? '/csvfiles/',
     0,
     obj.delimiter ?? ';',
     false,
@@ -69,7 +70,7 @@ export function csv_to_list_(obj: {
 export async function csv_to_list(
   csvfilename: string,
   antilist: any[] = [],
-  directory="./csvfiles/",
+  directory="/csvfiles/",
   lowerandstrip=0,
   delimiter=";",
   listoflistmode = false,
@@ -78,17 +79,15 @@ export async function csv_to_list(
   insanitylevel = -1
 ) {
   let replacing = true;
-  const userfilesDirectory = "./userfiles/";
+  const userfilesDirectory = "/userfiles/";
   const userfileAddonName = csvfilename + "_addon.csv";
   const userfileReplaceName = csvfilename + "_replace.csv";
   const lightfileName = csvfilename + "_light.csv";
   const mediumfileName = csvfilename + "_medium.csv";
   let csvlist: (string | string[])[] = [];
-
-  let fullPath = '';
   
   // check if there is a replace file
-  if(["./csvfiles/", "./csvfiles/special_lists/", "./csvfiles/templates/"].includes(directory)){
+  if(["/csvfiles/", "/csvfiles/special_lists/", "/csvfiles/templates/"].includes(directory)){
     // for filename in os.listdir(userfilesfolder):
     //     if(filename == userfilereplacename):
     //             # Just override the parameters, and let it run normally
@@ -115,22 +114,22 @@ export async function csv_to_list(
   }                
 
   // return empty list if we can't find the file. Build for antilist.csv
-  let content = await readTextFile(fullPath + csvfilename + ".csv");
+  let content = await readTextFile(directory + csvfilename + ".csv");
   if (content)
     csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
   // dirty hack for possible .txt files
   else {
-    content = await readTextFile(fullPath + csvfilename + ".txt");
+    content = await readTextFile(directory + csvfilename + ".txt");
     if (content)
       csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
   }
 
   // do the add ons!
-  if(directory=="./csvfiles/" || directory=="./csvfiles/special_lists/"){
-    let content = await readTextFile(UserfilesFolder + csvfilename + "_addon" + ".csv");
-    if (content)
-      csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
-  }
+  // if(directory=="/csvfiles/" || directory=="/csvfiles/special_lists/"){
+  //   let content = await readTextFile(UserfilesFolder + csvfilename + "_addon" + ".csv");
+  //   if (content)
+  //     csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
+  // }
 
   // remove duplicates, but check only for lowercase stuff
   let deduplicatedList: (string | string[])[] = [];

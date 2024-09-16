@@ -1,11 +1,14 @@
 import { csv_to_list, csv_to_list_ } from "./helpers/csvUtil";
 import {
   arrayRemove,
-  artist_category_csv_to_list, artist_descriptions_csv_to_list, chance_roll, common_dist, load_config_csv,
-  normal_dist, randint, randomChoice, rare_dist, uncommon_dist, unique_dist
+  artist_category_by_category_csv_to_list,
+  artist_category_csv_to_list, artist_descriptions_csv_to_list, chance_roll, common_dist, extraordinary_dist, legendary_dist, load_all_artist_and_category, load_config_csv,
+  normal_dist, novel_dist, randint, randomChoice, rare_dist, SeededRandom, shuffle, uncommon_dist, unique_dist
 } from "./helpers/general";
+import { customizedLogger } from "./helpers/logger";
 import { OneButtonPresets } from "./helpers/presets";
 import { translate_main_subject } from "./helpers/subjectUtils";
+import { answerBySuperprompt, loadSuperpromptV1Model } from "./models/superprompter-v1";
 
 const OBPresets = new OneButtonPresets();
 
@@ -13,7 +16,7 @@ function split_prompt_to_words(text: string) {
   // first get all the words
 
   // Use a regular expression to replace non-alphabetic characters with spaces
-  text = text.replace(/[^a-zA-Z,-]/g, ' ') //re.sub(r'[^a-zA-Z,-]', ' ', text)
+  text = text.replace(/[^a-zA-Z,-]/g, ' ') //completeprompt.replaceAll(r'[^a-zA-Z,-]', ' ', text)
 
   // Split the string by commas and spaces
   let words = text.split(/[,\s]+/)
@@ -43,6 +46,12 @@ function split_prompt_to_words(text: string) {
   return totallist
 }
 
+function replaceMatch(match: RegExpMatchArray) {
+  // Extract the first word from the match
+  const words = match[0].slice(1, -1).split('|');
+  return words[0];
+}
+
 function cleanup(completeprompt: string, advancedprompting: boolean, insanitylevel = 5) {
   // This part is turned off, will bring it back later as an option
     
@@ -52,145 +61,146 @@ function cleanup(completeprompt: string, advancedprompting: boolean, insanitylev
   // allLoRA = re.findall(r"<[^>]+>", completeprompt)
 
   // Remove the extracted matches from completeprompt
-  // completeprompt = re.sub(r"<[^>]+>", "", completeprompt)
+  // completeprompt = completeprompt.replaceAll(r"<[^>]+>", "", completeprompt)
 
 
   // if we are not using advanced prompting, remove any hybrid stuff:
   if(!advancedprompting) {
-    const hybridpattern = r'\[\w+\|\w+\]'
+    const hybridPattern = /\[\w+\|\w+\]/g;
     // Replace the matched pattern with the first word in the group
-    completeprompt = re.sub(hybridpattern, replace_match, completeprompt)
+    completeprompt = completeprompt.replace(hybridPattern, (match) => replaceMatch(match.match(hybridPattern)!));
 
     // Doesnt work if there are multiple words, so then just get rid of things as is :D
-    completeprompt = completeprompt.replace("[", " ")
-    completeprompt = completeprompt.replace("]", " ")
-    completeprompt = completeprompt.replace("|", " ")
+    completeprompt = completeprompt.replaceAll("[", " ")
+    completeprompt = completeprompt.replaceAll("]", " ")
+    completeprompt = completeprompt.replaceAll("|", " ")
   }
 
   // sometimes if there are not enough artist, we get left we things formed as (:1.2)
-  completeprompt = re.sub(r'\(\:\d+\.\d+\)', '', completeprompt)
+  completeprompt = completeprompt.replace(/\(\:\d+\.\d+\)/g, '')
 
   // lets also remove some wierd stuff on lower insanitylevels
-  if(insanitylevel < 7):
-      completeprompt = completeprompt.replace("DayGlo", " ")
-      completeprompt = completeprompt.replace("fluorescent", " ")
+  if(insanitylevel < 7) {
+    completeprompt = completeprompt.replaceAll("DayGlo", " ")
+    completeprompt = completeprompt.replaceAll("fluorescent", " ")
+  }
 
   // all cleanup steps moved here
-  completeprompt = re.sub(r'\[ ', '[', completeprompt)
-  completeprompt = re.sub(r'\[,', '[', completeprompt)
-  completeprompt = re.sub(r' \]', ']', completeprompt)
-  completeprompt = re.sub(r' \|', '|', completeprompt)
-  //completeprompt = re.sub(r' \"', '\"', completeprompt)
-  //completeprompt = re.sub(r'\" ', '\"', completeprompt)
-  completeprompt = re.sub(r'\( ', '(', completeprompt)
-  completeprompt = re.sub(r' \(', '(', completeprompt)
-  completeprompt = re.sub(r'\) ', ')', completeprompt)
-  completeprompt = re.sub(r' \)', ')', completeprompt)
+  completeprompt = completeprompt.replace(/\[ /g, '[')
+  completeprompt = completeprompt.replace(/\[,/g, '[',)
+  completeprompt = completeprompt.replace(/ \]/g, ']')
+  completeprompt = completeprompt.replace(/ \|/g, '|')
+  //completeprompt = completeprompt.replaceAll(r' \"', '\"', completeprompt)
+  //completeprompt = completeprompt.replaceAll(r'\" ', '\"', completeprompt)
+  completeprompt = completeprompt.replace(/\( /g, '(')
+  completeprompt = completeprompt.replace(/ \(/g, '(')
+  completeprompt = completeprompt.replace(/\) /g, ')')
+  completeprompt = completeprompt.replace(/ \)/g, ')')
 
-  completeprompt = re.sub(' :', ':', completeprompt)
-  completeprompt = re.sub(',::', '::', completeprompt)
-  completeprompt = re.sub(',:', ':', completeprompt)
+  completeprompt = completeprompt.replaceAll(' :', ':')
+  completeprompt = completeprompt.replaceAll(',::', '::')
+  completeprompt = completeprompt.replaceAll(',:', ':')
 
-  completeprompt = re.sub(',,', ', ', completeprompt)
-  completeprompt = re.sub(',,', ', ', completeprompt)
-  completeprompt = re.sub(',,,', ', ', completeprompt)
-  completeprompt = re.sub(', ,', ',', completeprompt)
-  completeprompt = re.sub(' , ', ', ', completeprompt)
-  completeprompt = re.sub(' ,', ',', completeprompt)
-  completeprompt = re.sub(' ,', ',', completeprompt)
-  completeprompt = re.sub(' ,', ',', completeprompt)
-  completeprompt = re.sub(r',\(', ', (', completeprompt)
+  completeprompt = completeprompt.replaceAll(',,', ', ')
+  completeprompt = completeprompt.replaceAll(',,', ', ')
+  completeprompt = completeprompt.replaceAll(',,,', ', ')
+  completeprompt = completeprompt.replaceAll(', ,', ',')
+  completeprompt = completeprompt.replaceAll(' , ', ', ')
+  completeprompt = completeprompt.replaceAll(' ,', ',')
+  completeprompt = completeprompt.replaceAll(' ,', ',')
+  completeprompt = completeprompt.replaceAll(' ,', ',')
+  completeprompt = completeprompt.replace(/,\(/g, ', (')
 
 
 
-  while "  " in completeprompt:
-      completeprompt = re.sub('  ', ' ', completeprompt)
-  completeprompt = re.sub('a The', 'The', completeprompt)
-  completeprompt = re.sub('the the', 'the', completeprompt)
-  completeprompt = re.sub(', ,', ',', completeprompt)
-  completeprompt = re.sub(',,', ',', completeprompt)
+  while (completeprompt.includes("  "))
+    completeprompt = completeprompt.replaceAll('  ', ' ')
+  completeprompt = completeprompt.replaceAll('a The', 'The')
+  completeprompt = completeprompt.replaceAll('the the', 'the')
+  completeprompt = completeprompt.replaceAll(', ,', ',')
+  completeprompt = completeprompt.replaceAll(',,', ',')
 
-  completeprompt = re.sub(', of a', ' of a', completeprompt)
-  completeprompt = re.sub('of a,', 'of a', completeprompt)
-  completeprompt = re.sub('of a of a', 'of a', completeprompt)
-  completeprompt = re.sub(' a a ', ' a ', completeprompt)
+  completeprompt = completeprompt.replaceAll(', of a', ' of a')
+  completeprompt = completeprompt.replaceAll('of a,', 'of a')
+  completeprompt = completeprompt.replaceAll('of a of a', 'of a')
+  completeprompt = completeprompt.replaceAll(' a a ', ' a ')
 
   // a / an
-  completeprompt = re.sub(' a a', ' an a', completeprompt)
-  completeprompt = re.sub(' a e', ' an e', completeprompt)
-  completeprompt = re.sub(' a i', ' an i', completeprompt)
-  completeprompt = re.sub(' a u', ' an u', completeprompt)
-  completeprompt = re.sub(' a o', ' an o', completeprompt)
+  completeprompt = completeprompt.replaceAll(' a a', ' an a')
+  completeprompt = completeprompt.replaceAll(' a e', ' an e')
+  completeprompt = completeprompt.replaceAll(' a i', ' an i')
+  completeprompt = completeprompt.replaceAll(' a u', ' an u')
+  completeprompt = completeprompt.replaceAll(' a o', ' an o')
 
 
-  completeprompt = re.sub('art art', 'art', completeprompt)
-  completeprompt = re.sub('Art art', 'art', completeprompt)
-  completeprompt = re.sub('lighting lighting', 'lighting', completeprompt)
-  completeprompt = re.sub('Lighting lighting', 'lighting', completeprompt)
-  completeprompt = re.sub('light lighting', 'light', completeprompt)
-  completeprompt = re.sub('-artiststyle- art,', '', completeprompt)
-  completeprompt = re.sub('-artiststyle- art', '', completeprompt)
-  completeprompt = re.sub('-artiststyle-', '', completeprompt)
-  completeprompt = re.sub('-artistmedium-', '', completeprompt)
-  completeprompt = re.sub('-artistdescription-', '', completeprompt)
-  completeprompt = re.sub('- art ', '', completeprompt)
+  completeprompt = completeprompt.replaceAll('art art', 'art')
+  completeprompt = completeprompt.replaceAll('Art art', 'art')
+  completeprompt = completeprompt.replaceAll('lighting lighting', 'lighting')
+  completeprompt = completeprompt.replaceAll('Lighting lighting', 'lighting')
+  completeprompt = completeprompt.replaceAll('light lighting', 'light')
+  completeprompt = completeprompt.replaceAll('-artiststyle- art,', '')
+  completeprompt = completeprompt.replaceAll('-artiststyle- art', '')
+  completeprompt = completeprompt.replaceAll('-artiststyle-', '')
+  completeprompt = completeprompt.replaceAll('-artistmedium-', '')
+  completeprompt = completeprompt.replaceAll('-artistdescription-', '')
+  completeprompt = completeprompt.replaceAll('- art ', '')
 
-  completeprompt = re.sub('anime anime', 'anime', completeprompt)
-  completeprompt = re.sub('anime, anime', 'anime', completeprompt)
+  completeprompt = completeprompt.replaceAll('anime anime', 'anime')
+  completeprompt = completeprompt.replaceAll('anime, anime', 'anime')
 
-  completeprompt = re.sub('shot shot', 'shot', completeprompt)
+  completeprompt = completeprompt.replaceAll('shot shot', 'shot')
   
 
-  completeprompt = re.sub('a his', 'his', completeprompt)
-  completeprompt = re.sub('a her', 'her', completeprompt)
-  completeprompt = re.sub('they is', 'they are', completeprompt)
-  completeprompt = re.sub('they has', 'they have', completeprompt)
+  completeprompt = completeprompt.replaceAll('a his', 'his')
+  completeprompt = completeprompt.replaceAll('a her', 'her')
+  completeprompt = completeprompt.replaceAll('they is', 'they are')
+  completeprompt = completeprompt.replaceAll('they has', 'they have')
 
   // some space tricks
-  completeprompt = re.sub('- shaped', '-shaped', completeprompt)
-  completeprompt = re.sub('echa- ', 'echa-', completeprompt)
-  completeprompt = re.sub('style -', 'style-', completeprompt)
-  completeprompt = re.sub(', as a', ' as a', completeprompt)
+  completeprompt = completeprompt.replaceAll('- shaped', '-shaped')
+  completeprompt = completeprompt.replaceAll('echa- ', 'echa-')
+  completeprompt = completeprompt.replaceAll('style -', 'style-')
+  completeprompt = completeprompt.replaceAll(', as a', ' as a')
 
 
   //small fix for multisubject thing
-  completeprompt = re.sub('a 2', '2', completeprompt)
-  completeprompt = re.sub('a 3', '3', completeprompt)
-  completeprompt = re.sub('a 4', '4', completeprompt)
-  completeprompt = re.sub('a 5', '5', completeprompt)
+  completeprompt = completeprompt.replaceAll('a 2', '2')
+  completeprompt = completeprompt.replaceAll('a 3', '3')
+  completeprompt = completeprompt.replaceAll('a 4', '4')
+  completeprompt = completeprompt.replaceAll('a 5', '5')
 
 
   // clean up some hacky multiples with adding a s to the end
-  completeprompt = re.sub('fs ', 'ves ', completeprompt)
-  completeprompt = re.sub('fs,', 'ves,', completeprompt)
-  completeprompt = re.sub('sss ', 'ss ', completeprompt)
-  completeprompt = re.sub('sss,', 'ss,', completeprompt)
-  completeprompt = re.sub(' Mans', ' Men,', completeprompt)
-  completeprompt = re.sub(' mans', ' men', completeprompt)
-  completeprompt = re.sub(' Womans,', ' Women', completeprompt)
-  completeprompt = re.sub(' womans,', ' women,', completeprompt)
-  completeprompt = re.sub(r'\(Mans', '(Men,', completeprompt)
-  completeprompt = re.sub(r'\(mans', '(men', completeprompt)
-  completeprompt = re.sub(r'\(Womans', '(Women', completeprompt)
-  completeprompt = re.sub(r'\(womans', '(women', completeprompt)
+  completeprompt = completeprompt.replaceAll('fs ', 'ves ')
+  completeprompt = completeprompt.replaceAll('fs,', 'ves,')
+  completeprompt = completeprompt.replaceAll('sss ', 'ss ')
+  completeprompt = completeprompt.replaceAll('sss,', 'ss,')
+  completeprompt = completeprompt.replaceAll(' Mans', ' Men,')
+  completeprompt = completeprompt.replaceAll(' mans', ' men')
+  completeprompt = completeprompt.replaceAll(' Womans,', ' Women')
+  completeprompt = completeprompt.replaceAll(' womans,', ' women,')
+  completeprompt = completeprompt.replace(/\(Mans/g, '(Men,')
+  completeprompt = completeprompt.replace(/\(mans/g, '(men')
+  completeprompt = completeprompt.replace(/\(Womans/g, '(Women')
+  completeprompt = completeprompt.replace(/\(womans/g, '(women')
 
-  completeprompt = re.sub('-sameothersubject-', 'it', completeprompt)
-  completeprompt = re.sub('-samehumansubject-', 'the person', completeprompt)
+  completeprompt = completeprompt.replaceAll('-sameothersubject-', 'it')
+  completeprompt = completeprompt.replaceAll('-samehumansubject-', 'the person')
 
   
-  completeprompt = re.sub(r'(?<!\()\s?\(', ' (', completeprompt)
-  completeprompt = re.sub(r'\)(?![\s)])', ') ', completeprompt)
+  completeprompt = completeprompt.replace(/(?<!\()\s?\(/g, ' (')
+  completeprompt = completeprompt.replace(/\)(?![\s)])/g, ') ')
 
   // Move the extracted LoRA's to the end of completeprompt
   //completeprompt += " " + " ".join(allLoRA)   
 
-  completeprompt = completeprompt.replace(' . ', '. ')
-  completeprompt = completeprompt.replace(', . ', '. ')
-  completeprompt = completeprompt.replace(',. ', '. ')
-  completeprompt = completeprompt.replace('., ', '. ')
-  completeprompt = completeprompt.replace('. . ', '. ')
+  completeprompt = completeprompt.replaceAll(' . ', '. ')
+  completeprompt = completeprompt.replaceAll(', . ', '. ')
+  completeprompt = completeprompt.replaceAll(',. ', '. ')
+  completeprompt = completeprompt.replaceAll('., ', '. ')
+  completeprompt = completeprompt.replaceAll('. . ', '. ')
 
-  completeprompt = completeprompt.strip(", ")
+  completeprompt = completeprompt.replaceAll(", ", '')
 
   return completeprompt
 }
@@ -256,15 +266,180 @@ function parse_custom_functions(completeprompt: string, insanitylevel = 5) {
     //print(arguments)
     or_replacement = custom_or(argumentss, insanitylevel)
     const completematch = 'OR(' + match + ')'
-    completeprompt = completeprompt.replace(completematch, or_replacement)
+    completeprompt = completeprompt.replaceAll(completematch, or_replacement)
+  }
+  return completeprompt
+}
+
+async function artify_prompt(insanitylevel = 5, prompt = "", artists = "all", amountofartists = "1", mode = "standard", seed = -1) {
+  let intamountofartists = 0
+  if(amountofartists=="random")
+    intamountofartists = randint(1,Math.floor((insanitylevel/3) + 1.20))
+  else    
+    intamountofartists = Math.floor(Number(amountofartists) ?? 1)
+
+  // set seed
+  // For use in ComfyUI (might bring to Automatic1111 as well)
+  // lets do it when its larger than 0
+  // Otherwise, just do nothing and it will keep on working based on an earlier set seed
+  //if(seed > 0)
+  //  random.seed(seed)
+  const randInst = new SeededRandom(seed);
+
+  // first build up a complete anti list. Those values are removing during list building
+  // this uses the antivalues string AND the antilist.csv
+  let emptylist: string[] = []
+  let antilist = await csv_to_list("antilist", emptylist , "/userfiles/",1)
+  
+  // clean up antivalue list:
+  antilist = antilist.map(it => it.toString().trim().toLowerCase()) // [s.strip().lower() for s in antilist]
+
+    // build artists list
+  if (artists == "wild")
+    artists = "all (wild)"
+
+  // we want to create more cohorence, so we are adding all (wild) mode for the old logic
+  
+  let artisttypes = ["popular", "3D",	"abstract",	"angular", "anime"	,"architecture",	"art nouveau",	"art deco",	"baroque",	"bauhaus", 	"cartoon",	"character",	"children's illustration", 	"cityscape", "cinema",	"clean",	"cloudscape",	"collage",	"colorful",	"comics",	"cubism",	"dark",	"detailed", 	"digital",	"expressionism",	"fantasy",	"fashion",	"fauvism",	"figurativism",	"graffiti",	"graphic design",	"high contrast",	"horror",	"impressionism",	"installation",	"landscape",	"light",	"line drawing",	"low contrast",	"luminism",	"magical realism",	"manga",	"melanin",	"messy",	"monochromatic",	"nature",	"photography",	"pop art",	"portrait",	"primitivism",	"psychedelic",	"realism",	"renaissance",	"romanticism",	"scene",	"sci-fi",	"sculpture",	"seascape",	"space",	"stained glass",	"still life",	"storybook realism",	"street art",	"streetscape",	"surrealism",	"symbolism",	"textile",	"ukiyo-e",	"vibrant",	"watercolor",	"whimsical"]
+  let artiststyleselector = ""
+  let artiststyleselectormode = "normal"
+  artiststyleselector = artisttypes[randInst.randomRange(0, artisttypes.length - 1)]
+
+  let artistlist: string[] = []
+  // create artist list to use in the code, maybe based on category  or personal lists
+  if(artists != "all (wild)" && artists != "all" && artists != "none" && artists.startsWith("personal_artists") == false && artists.startsWith("personal artists") == false && artists in artisttypes)
+    artistlist = await artist_category_csv_to_list("artists_and_category",artists)
+  else if(artists.startsWith("personal_artists") || artists.startsWith("personal artists")) {
+    artists = artists.replaceAll(" ", "_") // add underscores back in
+    artistlist = (await csv_to_list(artists,antilist,"/userfiles/")) as string[]
+  }
+  else if(artists != "none")
+    artistlist = (await csv_to_list("artists",antilist)) as string[]
+  
+
+  // load up the styles list for the other modes
+  let styleslist = await csv_to_list("styles", antilist,"/csvfiles/templates/",0,"?")
+  let stylessuffix = styleslist.map(it => it.toString().split('-subject-')[1]) // [item.split('-subject-')[1] for item in styleslist]
+  let breakstylessuffix = stylessuffix.map(it => it.split(',')) // [item.split(',') for item in stylessuffix]
+  let allstylessuffixlist = breakstylessuffix.flat(10)
+  allstylessuffixlist = Array.from(new Set(allstylessuffixlist))
+
+  let artistsuffix = await artist_descriptions_csv_to_list("artists_and_category")
+  let breakartiststylessuffix = artistsuffix.map(it => it.split(',')) // [item.split(',') for item in artistsuffix]
+  let artiststylessuffixlist = breakartiststylessuffix.flat(10)
+  artiststylessuffixlist = Array.from(new Set(artiststylessuffixlist))
+  allstylessuffixlist = [...allstylessuffixlist, ...artiststylessuffixlist]
+
+  let completeprompt = ""
+  if(common_dist(insanitylevel))
+    completeprompt += "-artiststyle- "
+  completeprompt += "art by "
+  //Lets go effing artify this MF'er
+      
+  for (let i = 0;i < intamountofartists;i++) {
+    if(intamountofartists > 1 && i == intamountofartists - 2)
+      completeprompt += "-artist- and "
+    else
+      completeprompt += "-artist-, "
+  }
+  
+  if(uncommon_dist(insanitylevel))
+    completeprompt += "-artistmedium-, " 
+          
+  // now add the prompt in
+  completeprompt += prompt
+
+  if(mode.toLowerCase() == "remix") {
+    for (let i = 0;i < intamountofartists;i++) {
+      const item = artistsuffix[randInst.randomRange(0, artistsuffix.length - 1)]
+      completeprompt += ", " + artistsuffix.splice(artistsuffix.indexOf(item), 1)[0]
+    }
   }
 
+  else if(mode.toLowerCase() == "super remix turbo") {
+    for (let i = 0;i < intamountofartists * 4;i++) {
+      const it = allstylessuffixlist[randInst.randomRange(0, allstylessuffixlist.length - 1)]
+      completeprompt += ", " + allstylessuffixlist.splice(allstylessuffixlist.indexOf(it), 1)[0]
+    }
+  }
+
+  else {
+    // else just go standard
+    for (let i = 0;i < intamountofartists;i++)
+      completeprompt += ", -artistdescription-"
+  }
   
+  while (completeprompt.includes("-artist-"))
+    completeprompt = await replacewildcard(completeprompt,5,"-artist-", artistlist,false,false,artiststyleselector)
 
   return completeprompt
 }
 
-function replacewildcard(
+async function enhance_positive(positive_prompt = "", amountofwords = 3) {
+  const wordcombilist = await csv_to_list_({csvfilename:"wordcombis", directory:"/csvfiles/special_lists/",delimiter:"?", antilist:[]})
+
+  // do a trick for artists, replace with their tags instead
+  const { artistlist, categorylist } = await load_all_artist_and_category()
+  // lower them
+  const artist_names = artistlist.map(it => it.trim().toLowerCase())
+
+  // note, should we find a trick for some shorthands of artists??
+  const artistshorthands = await csv_to_list_({csvfilename:"artistshorthands",directory:"/csvfiles/special_lists/",delimiter:"?", antilist:[]})
+  for (const shorthand of artistshorthands) {
+    const parts = shorthand.toString().split(';')
+    if (positive_prompt.includes(parts[0]))
+      positive_prompt = positive_prompt.toLowerCase().replaceAll(parts[0].toLowerCase(), parts[1].toLowerCase())
+  }
+
+  for (const i in artistlist) {
+    const artist_name = artistlist[i]
+    const category = categorylist[i]
+    positive_prompt = positive_prompt.toLowerCase().replaceAll(artist_name, category)
+  }
+
+  let allwords = split_prompt_to_words(positive_prompt)
+  allwords = allwords.map(it => it.trim().toLowerCase()) // lower them
+
+  let newwordlist: string[] = []
+  let addwords = ""
+  let wordsfound = 0
+  
+  //lower all!
+
+  for (const combiset of wordcombilist.map(it => it.toString())) {
+    const combiwords = new Set(combiset.split(', '))
+    for (const combiword of combiwords) {
+      for (const word of allwords) {
+        if(word.toLowerCase() == combiword.toLowerCase()) {
+          wordsfound += 1
+          let combiwords2 = Array.from(new Set(combiset.split(', ')))
+          // remove and only take one
+          combiwords2 = combiwords2.filter(it => !allwords.includes(it)) //[word for word in combiwords2 if word not in allwords]
+          //for combiword2 in combiwords2:
+          if(combiwords2.length)
+            newwordlist.push(randomChoice(combiwords2))
+        }
+      }
+    }
+  }
+  
+  newwordlist = newwordlist.filter(it => !allwords.includes(it)) // [word for word in newwordlist if word not in allwords]
+  newwordlist = Array.from(new Set(newwordlist)) // make unique
+  
+  
+  for (let i = 0;i < amountofwords;i++) {
+    if(newwordlist.length > 0) {
+      const word = newwordlist.splice(randint(0, newwordlist.length), 1)[0]
+      addwords += ", " + word
+      //print(addwords)
+    }
+  }
+  
+
+  return addwords
+}
+
+async function replacewildcard(
   completeprompt: string,
   insanitylevel: number,
   wildcard: string,
@@ -275,147 +450,670 @@ function replacewildcard(
 ) {
   if(!listname.length)
     // handling empty lists
-    completeprompt = completeprompt.replace(wildcard, "",1)
+    completeprompt = completeprompt.replace(wildcard, "")
   else {
     while (completeprompt.includes(wildcard)) {
-      if(unique_dist(insanitylevel) and activatehybridorswap == True and len(listname)>2 and advancedprompting==True) {
-        hybridorswaplist = ["hybrid", "swap"]
-        hybridorswap = random.choice(hybridorswaplist)
-        replacementvalue = random.choice(listname)
-        listname.remove(replacementvalue)
-        hybridorswapreplacementvalue = "[" + replacementvalue
+      let replacementvalue = ''
+      if(unique_dist(insanitylevel) && activatehybridorswap && listname.length>2 && advancedprompting) {
+        const hybridorswaplist = ["hybrid", "swap"]
+        let hybridorswap = randomChoice(hybridorswaplist)
+        replacementvalue = randomChoice(listname)
+        arrayRemove(listname, replacementvalue)
+        let hybridorswapreplacementvalue = "[" + replacementvalue
         
-        if(hybridorswap == "hybrid"):
-                replacementvalue = random.choice(listname)
-                listname.remove(replacementvalue)
-                hybridorswapreplacementvalue += "|" + replacementvalue + "] "
-        if(hybridorswap == "swap"):
-                replacementvalue = random.choice(listname)
-                listname.remove(replacementvalue)
-                hybridorswapreplacementvalue += ":" + replacementvalue + ":" + str(random.randint(1,20)) +  "] "
+        if(hybridorswap == "hybrid") {
+          replacementvalue = randomChoice(listname)
+          arrayRemove(listname, replacementvalue)
+          hybridorswapreplacementvalue += "|" + replacementvalue + "] "
+        }
+        if(hybridorswap == "swap") {
+          replacementvalue = randomChoice(listname)
+          arrayRemove(listname, replacementvalue)
+          hybridorswapreplacementvalue += ":" + replacementvalue + ":" + randint(1,20) +  "] "
+        }
         
-        completeprompt = completeprompt.replace(wildcard, hybridorswapreplacementvalue,1)
+        completeprompt = completeprompt.replaceAll(wildcard, hybridorswapreplacementvalue)
       }
-
+      
       //if list is not empty
-      if(bool(listname)):
-          replacementvalue = random.choice(listname)
-          if(wildcard not in ["-heshe-", "-himher-","-hisher-"]):
-              listname.remove(replacementvalue)
-          
-      else:
-          replacementvalue = ""
+      if(Boolean(listname?.length)) {
+        replacementvalue = randomChoice(listname)
+        if(!["-heshe-", "-himher-","-hisher-"].includes(wildcard))
+          arrayRemove(listname, replacementvalue)
+      } else
+        replacementvalue = ""
 
       // override for artist and artiststyle, only for first artist
-      if(wildcard == "-artist-" and ("-artiststyle-" in completeprompt or "-artistmedium-" in completeprompt or "-artistdescription-" in completeprompt)):
-          artiststyles = []
-          artiststyle = []
-          chosenartiststyle = ""
-          artistscomplete = artist_category_by_category_csv_to_list("artists_and_category",replacementvalue)
-          artiststyles = artistscomplete[0]
-          artistmediums = artistscomplete[1]
-          artistdescriptions = artistscomplete[2]
-          artiststyle = [x.strip() for x in artiststyles[0].split(",")]
+      if(wildcard == "-artist-" && (completeprompt.includes("-artiststyle-") || completeprompt.includes("-artistmedium-") || completeprompt.includes("-artistdescription-"))) {
+        let artiststyles = []
+        let artiststyle: string[] = []
+        let chosenartiststyle = ""
+        let artistscomplete = await artist_category_by_category_csv_to_list("artists_and_category",replacementvalue)
+        artiststyles = artistscomplete[0]
+        let artistmediums = artistscomplete[1]
+        let artistdescriptions = artistscomplete[2]
+        artiststyle = artiststyles[0].split(",").map(x => x.trim())
 
-          artiststyle = list(filter(lambda x: len(x) > 0, artiststyle)) # remove empty values
+        artiststyle = artiststyle.filter(x => x?.length) // remove empty values
 
-          if(artiststyleselector in artiststyle):
-              artiststyle.remove(artiststyleselector)
+        if(artiststyleselector in artiststyle)
+          arrayRemove(artiststyle, artiststyleselector)
 
-          # Sorry folks, this only works when you directly select it as a style
-          if("nudity" in artiststyle):
-              artiststyle.remove("nudity")
+        // Sorry folks, this only works when you directly select it as a style
+        if("nudity" in artiststyle)
+          arrayRemove(artiststyle, "nudity")
 
-          # keep on looping until we have no more wildcards or no more styles to choose from
-          # leftovers will be removed in the cleaning step
-          while bool(artiststyle) and "-artiststyle-" in completeprompt:
-          
-              chosenartiststyle = random.choice(artiststyle)
-              completeprompt = completeprompt.replace("-artiststyle-",chosenartiststyle ,1)
-              artiststyle.remove(chosenartiststyle)
+        // keep on looping until we have no more wildcards or no more styles to choose from
+        // leftovers will be removed in the cleaning step
+        while (Boolean(artiststyle.length) && completeprompt.includes("-artiststyle-")) {
+          chosenartiststyle = randomChoice(artiststyle)
+          completeprompt = completeprompt.replace("-artiststyle-",chosenartiststyle)
+          arrayRemove(artiststyle, chosenartiststyle)
+        }
 
-          if("-artistmedium-" in completeprompt):
-              if(artistmediums[0].lower() not in completeprompt.lower()):
-                  completeprompt = completeprompt.replace("-artistmedium-",artistmediums[0] ,1)
+        if(completeprompt.includes("-artistmedium-")) {
+          if(!completeprompt.toLowerCase().includes(artistmediums[0].toLowerCase()))
+            completeprompt = completeprompt.replace("-artistmedium-",artistmediums[0])
+        }
 
-          if("-artistdescription-" in completeprompt):
-              completeprompt = completeprompt.replace("-artistdescription-",artistdescriptions[0] ,1)
-          
-          while bool(artiststyle) and "-artiststyle-" in completeprompt:
-          
-              chosenartiststyle = random.choice(artiststyle)
-              completeprompt = completeprompt.replace("-artiststyle-",chosenartiststyle ,1)
-              artiststyle.remove(chosenartiststyle)
+        if(completeprompt.includes("-artistdescription-"))
+          completeprompt = completeprompt.replace("-artistdescription-",artistdescriptions[0])
+        
+        while (Boolean(artiststyle.length) && completeprompt.includes("-artiststyle-")) {
+          chosenartiststyle = randomChoice(artiststyle)
+          completeprompt = completeprompt.replace("-artiststyle-",chosenartiststyle)
+          arrayRemove(artiststyle, chosenartiststyle)
+        }
+      }
 
       
       
-      # Sneaky overrides for "same" wildcards
-      # Are overwritten with their first parent
-      if(wildcard == "-outfit-" or wildcard == "-minioutfit-"):
-          completeprompt = completeprompt.replace("-sameoutfit-", replacementvalue,1)
+      // Sneaky overrides for "same" wildcards
+      // Are overwritten with their first parent
+      if(wildcard == "-outfit-" || wildcard == "-minioutfit-")
+        completeprompt = completeprompt.replace("-sameoutfit-", replacementvalue)
 
-      # Why do it in this detail?? Because we can:
-      # Check if "from" exists in the string. For example Chun Li from Streetfighter, becomes Chun li
-      if "from" in replacementvalue:
-          # Find the index of "from" in the string
-          from_index = replacementvalue.find("from")
+      let replacementvalueforoverrides = ''
+      // Why do it in this detail?? Because we can:
+      // Check if "from" exists in the string. For example Chun Li from Streetfighter, becomes Chun li
+      if (replacementvalue.includes('from')) {
+        // Find the index of "from" in the string
+        const from_index = replacementvalue.indexOf("from")
 
-          # Remove everything from and including "from"
-          replacementvalueforoverrides = replacementvalue[:from_index].strip()
-      else:
-          replacementvalueforoverrides = replacementvalue
+        // Remove everything from and including "from"
+        replacementvalueforoverrides = replacementvalue.slice(0, from_index).trim()
+      } else
+        replacementvalueforoverrides = replacementvalue
 
-      if(wildcard in ["-human-"
-                      ,"-humanoid-"
-                      , "-manwoman-"                            
-                      , "-manwomanrelation-"
-                      , "-manwomanmultiple-"]
-                      and "-samehumansubject-" in completeprompt):
-                      if(completeprompt.index(wildcard) < completeprompt.index("-samehumansubject-")):
-                          completeprompt = completeprompt.replace("-samehumansubject-", "the " + replacementvalueforoverrides)
+      if(wildcard in [
+        "-human-"
+        ,"-humanoid-"
+        , "-manwoman-"
+        , "-manwomanrelation-"
+        , "-manwomanmultiple-"
+        ] && completeprompt.includes("-samehumansubject-")
+      ) {
+        if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
+          completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
+      }
       
-      if(wildcard in ["-fictional-"
-                      , "-nonfictional-"
-                      , "-firstname-"
-                      , "-oppositefictional-"
-                      , "-oppositenonfictional-"]
-                      and "-samehumansubject-" in completeprompt):
-                      if(completeprompt.index(wildcard) < completeprompt.index("-samehumansubject-")):
-                          completeprompt = completeprompt.replace("-samehumansubject-", replacementvalueforoverrides)
+      if(wildcard in [
+        "-fictional-"
+        , "-nonfictional-"
+        , "-firstname-"
+        , "-oppositefictional-"
+        , "-oppositenonfictional-"
+      ] && completeprompt.includes("-samehumansubject-" )) {
+        if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
+          completeprompt = completeprompt.replaceAll("-samehumansubject-", replacementvalueforoverrides)
+      }
       
-      # job is here, to prevent issue with a job outfit being replace. So doing it later solves that issue
-      if(wildcard in ["-job-"]
-                      and "-samehumansubject-" in completeprompt):
-                      if(completeprompt.index(wildcard) < completeprompt.index("-samehumansubject-")):
-                          completeprompt = completeprompt.replace("-samehumansubject-", "the " + replacementvalueforoverrides)
+      // job is here, to prevent issue with a job outfit being replace. So doing it later solves that issue
+      if(wildcard in ["-job-"] && completeprompt.includes("-samehumansubject-")) {
+        if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
+          completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
+      }
       
       
-      # This one last, since then it is the only subject we have left
-      if(wildcard in ["-malefemale-"]
-          and "-samehumansubject-" in completeprompt):
-          if(completeprompt.index(wildcard) < completeprompt.index("-samehumansubject-")):
-              completeprompt = completeprompt.replace("-samehumansubject-", "the " + replacementvalueforoverrides)
+      // This one last, since then it is the only subject we have left
+      if(["-malefemale-"].includes(wildcard)
+          && completeprompt.includes("-samehumansubject-")
+      ) {
+        if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
+          completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
+      }
 
-      if(wildcard in ["-animal-"                         
-                      , "-object-"
-                      , "-vehicle-"
-                      , "-food-"
-                      , "-objecttotal-" 
-                      , "-space-"
-                      , "-flora-"
-                      , "-location-"
-                      , "-building-"]
-                  and "-sameothersubject-" in completeprompt):
-          if(completeprompt.index(wildcard) < completeprompt.index("-sameothersubject-")):
-                      completeprompt = completeprompt.replace("-sameothersubject-", "the " + replacementvalueforoverrides)
+      if(wildcard in [
+        "-animal-"                         
+        , "-object-"
+        , "-vehicle-"
+        , "-food-"
+        , "-objecttotal-" 
+        , "-space-"
+        , "-flora-"
+        , "-location-"
+        , "-building-"]
+        &&  completeprompt.includes("-sameothersubject-")
+      ) {
+        if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-sameothersubject-"))
+          completeprompt = completeprompt.replaceAll("-sameothersubject-", "the " + replacementvalueforoverrides)
+      }
 
-
-
-      completeprompt = completeprompt.replace(wildcard, replacementvalue,1)
+      completeprompt = completeprompt.replace(wildcard, replacementvalue)
     }
   }
 
   return completeprompt
+}
+
+async function replace_user_wildcards(completeprompt: string) {
+  for (let i = 0;i < 10; i++) {
+    const user_wildcards_list = Array.from(completeprompt.match(/-[\w_]*-/g) ?? [])
+    for (const user_wildcard of user_wildcards_list) {
+      const user_wildcard_clean = user_wildcard.replaceAll("-", '')
+      const wordlist = await csv_to_list_({csvfilename:user_wildcard_clean, directory:"/userfiles/wildcards/", antilist: []})
+      if(wordlist?.length)
+        completeprompt = completeprompt.replace(user_wildcard, randomChoice(wordlist))
+    }
+  }
+
+  return completeprompt
+}
+
+function check_completeprompt_include (completeprompt: string) {
+  const arr = [
+    "-color-",
+    "-material-",
+    "-animal-",
+    "-object-",
+    "-fictional-",
+    "-nonfictional-",
+    "-conceptsuffix-",
+    "-building-",
+    "-vehicle-",
+    "-outfit-",
+    "-location-",
+    "-conceptprefix-",
+    "-descriptor-",
+    "-food-",
+    "-haircolor-",
+    "-hairstyle-",
+    "-job-",
+    "-culture-",
+    "-accessory-",
+    "-humanoid-",
+    "-manwoman-",
+    "-human-",
+    "-colorscheme-",
+    "-mood-",
+    "-genderdescription-",
+    "-artmovement-",
+    "-malefemale-",
+    "-objecttotal-",
+    "-outfitprinttotal-",
+    "-bodytype-",
+    "-minilocation-",
+    "-minilocationaddition-",
+    "-pose-",
+    "-season-",
+    "-minioutfit-",
+    "-elaborateoutfit-",
+    "-minivomit-",
+    "-vomit-",
+    "-rpgclass-",
+    "-subjectfromfile-",
+    "-outfitfromfile-",
+    "-brand-",
+    "-space-",
+    "-artist-",
+    "-imagetype-",
+    "-othertype-",
+    "-quality-",
+    "-lighting-",
+    "-camera-",
+    "-lens-",
+    "-imagetypequality-",
+    "-poemline-",
+    "-songline-",
+    "-greatwork-",
+    "-fantasyartist-", 
+    "-popularartist-", 
+    "-romanticismartist-", 
+    "-photographyartist-",
+    "-emoji-",
+    "-timeperiod-",
+    "-shotsize-",
+    "-musicgenre-",
+    "-animaladdition-",
+    "-addontolocationinside-",
+    "-addontolocation-",
+    "-objectaddition-",
+    "-humanaddition-",
+    "-overalladdition-",
+    "-focus-",
+    "-direction-",
+    "-styletilora-",
+    "-manwomanrelation-",
+    "-manwomanmultiple-",
+    "-waterlocation-",
+    "-container-",
+    "-firstname-",
+    "-flora-",
+    "-print-",
+    "-miniactivity-",
+    "-pattern-",
+    "-animalsuffixaddition-",
+    "-chair-",
+    "-cardname-",
+    "-covering-",
+    "-heshe-",
+    "-hisher-",
+    "-himher-",
+    "-outfitdescriptor-",
+    "-hairdescriptor-",
+    "-hairvomit-",
+    "-humandescriptor-",
+    "-facepart-",
+    "-buildfacepart-",
+    "-outfitvomit-",
+    "-locationdescriptor-",
+    "-basicbitchdescriptor-",
+    "-animaldescriptor-",
+    "-humanexpression-",
+    "-humanvomit-",
+    "-eyecolor-",
+    "-fashiondesigner-",
+    "-colorcombination-",
+    "-materialcombination-",
+    "-oppositefictional-",
+    "-oppositenonfictional-",
+    "-photoaddition-",
+    "-age-",
+    "-agecalculator-",
+    "-gregmode-",
+    "-portraitartist-",
+    "-characterartist-",
+    "-landscapeartist-",
+    "-scifiartist-",
+    "-graphicdesignartist-",
+    "-digitalartist-",
+    "-architectartist-",
+    "-cinemaartist-",
+    "-element-",
+    "-setting-",
+    "-charactertype-",
+    "-objectstohold-",
+    "-episodetitle-",
+    "-token-",
+    "-allstylessuffix-",
+    "-fluff-",
+    "-event-",
+    "-background-",
+    "-occult-",
+    "-locationfantasy-",
+    "-locationscifi-",
+    "-locationvideogame-",
+    "-locationbiome-",
+    "-locationcity-",
+    "-bird-",
+    "-cat-",
+    "-dog-",
+    "-insect-",
+    "-pokemon-",
+    "-pokemontype-",
+    "-marinelife-"
+  ];
+  return arr.some(x => completeprompt.includes(x));  
+}
+
+async function remove_superprompt_bias(superpromptresult = "", insanitylevel = 5, override_outfit = "") {
+  if(superpromptresult.includes(" green eye")) {
+    let eyecolorslist = await csv_to_list("eyecolors")
+    eyecolorslist = eyecolorslist.filter(x => !x.toString().startsWith('-')) // [x for x in eyecolorslist if not x.startswith('-')]
+    const neweyecolor = " " + randomChoice(eyecolorslist).toLowerCase() + " eye"
+    //print(neweyecolor)
+    superpromptresult = superpromptresult.replaceAll(" green eye", neweyecolor)
+  }
+
+  //  white gown  or white dress
+  if(superpromptresult.includes(" white gown") 
+      || superpromptresult.includes(" white dress")
+      || superpromptresult.includes(" black suit")
+  ) {
+    let colorcombinationslist = await csv_to_list("colorcombinations")
+    colorcombinationslist = colorcombinationslist.filter(it => !it.toString().startsWith('-')) // [x for x in colorcombinationslist if not x.startswith('-')]
+    let colorslist = await csv_to_list("colors")
+    colorslist = colorslist.filter(it => !it.toString().startsWith('-')) // [x for x in colorslist if not x.startswith('-')]
+    
+    let newcolordress = ""
+    let newcolorgown = ""
+    let newcolorsuit = ''
+    if(normal_dist(insanitylevel)) {
+      newcolordress = " " + randomChoice(colorcombinationslist).toLowerCase() + " dress"
+      newcolorgown = " " + randomChoice(colorcombinationslist).toLowerCase() + " gown"
+      newcolorsuit = " " + randomChoice(colorcombinationslist).toLowerCase() + " suit"
+    } else {
+      newcolordress = " " + randomChoice(colorslist).toLowerCase() + " dress"
+      newcolorgown = " " + randomChoice(colorslist).toLowerCase() + " gown"
+      newcolorsuit = " " + randomChoice(colorcombinationslist).toLowerCase() + " suit"
+    }
+    
+        //print(newcolordress)                
+    //print(newcolorgown)                
+    //print(newcolorsuit)
+    superpromptresult = superpromptresult.replaceAll(" white dress", newcolordress)
+    superpromptresult = superpromptresult.replaceAll(" white gown", newcolorgown)
+    superpromptresult = superpromptresult.replaceAll(" black suit", newcolorsuit)
+  }
+
+  if(superpromptresult.includes(" gown") 
+    || superpromptresult.includes(" dress") 
+    || superpromptresult.includes(" suit")
+    && !override_outfit.includes("gown") 
+    && !override_outfit.includes("dress")
+    && !override_outfit.includes("suit ")
+    && !superpromptresult.includes(" dressed")
+    && !superpromptresult.includes(" suited")
+  ) {
+    let newoutfit = ''
+    if(override_outfit == "") {
+      let outfitslist = await csv_to_list("outfits")
+      outfitslist = outfitslist.filter(it => !it.toString().startsWith('-')) // [x for x in outfitslist if not x.startswith('-')]
+      newoutfit = " " + randomChoice(outfitslist).toLowerCase()
+    } else
+      newoutfit = " " + override_outfit
+    superpromptresult = superpromptresult.replaceAll(" dress", newoutfit)
+    superpromptresult = superpromptresult.replaceAll(" gown", newoutfit)
+    superpromptresult = superpromptresult.replaceAll(" suit", newoutfit)
+  }
+
+  if(superpromptresult.includes(" sleek ")) {
+    let descriptorslist = await csv_to_list("descriptors")
+    descriptorslist = descriptorslist.filter(it => !it.toString().startsWith('-')) //[x for x in descriptorslist if not x.startswith('-')]
+    const newdescriptor = " " + randomChoice(descriptorslist).toLowerCase() + " "
+    //print(newdescriptor)
+
+    superpromptresult = superpromptresult.replaceAll(" sleek ", newdescriptor)
+  }
+
+  //// lush green (meadow), sun shines down
+  // A graceful woman with long, flowing hair stands on a lush green lawn, her arms spread wide as she kneels gently in the breeze. The sun shines down on her
+  if(superpromptresult.includes("lush green meadow")) {
+    let backgroundlist = await csv_to_list("backgrounds")
+    backgroundlist = backgroundlist.filter(it => !it.toString().startsWith('-')) // [x for x in backgroundlist if not x.startswith('-')]
+    const newbackground = randomChoice(backgroundlist).toLowerCase()
+    //print(newbackground)
+
+    superpromptresult = superpromptresult.replaceAll("lush green meadow", newbackground)
+  }
+
+  if(superpromptresult.includes("long, flowing hair")) {
+    let hairstylelist = await csv_to_list("hairstyles2")
+    hairstylelist = hairstylelist.filter(it => !it.toString().startsWith('-')) // [x for x in hairstylelist if not x.startswith('-')]
+    const newhairstyle = randomChoice(hairstylelist).toLowerCase()
+    //print(newhairstyle)
+
+    superpromptresult = superpromptresult.replaceAll("long, flowing hair", newhairstyle)
+  }
+  
+  return superpromptresult
+}
+
+function removeCharacters(input: string, charsToRemove: string): string {
+  // Create a regular expression from the characters to remove, escaping special characters if needed
+  const charsToRemoveRegex = new RegExp(`[${charsToRemove.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}]`, 'g');
+  
+  // Replace all occurrences of the characters with an empty string
+  return input.replace(charsToRemoveRegex, '');
+}
+
+async function one_button_superprompt(insanitylevel = 5, prompt = "", seed = -1, override_subject = "" , override_outfit = "", chosensubject ="", gender = "", restofprompt = "", superpromptstyle = "", setnewtokens = 0, remove_bias = true) {
+  if(seed <= 0)
+    seed = randint(1,1000000)
+  
+  let done = false
+  const load_model_promise = loadSuperpromptV1Model()
+
+  const superprompterstyleslist = await csv_to_list("superprompter_styles")
+  const descriptorlist = await csv_to_list("descriptors")
+  const devmessagessuperpromptlist = await csv_to_list("devmessages_superprompt")
+
+  let usestyle = false
+  if(superpromptstyle != "" && superpromptstyle != "all")
+    usestyle = true
+
+  restofprompt = restofprompt.toLowerCase()
+  let question = ""
+
+  // first, move LoRA's to the back dynamically
+
+  // Find all occurrences of text between < and > using regex
+  let allLoRA = Array.from(prompt.match(/<[^>]+>/g) ?? [])
+
+  // Remove the extracted matches from completeprompt
+  prompt = prompt.replace(/<[^>]+>/g, "")
+  override_subject = override_subject.replace(/<[^>]+>/g, "")
+  
+  const temperature_lookup: Record<number, number> = {
+    1: 0.01,
+    2: 0.1,
+    3: 0.3,
+    4: 0.5,
+    5: 0.6,
+    6: 0.7,
+    7: 1.0,
+    8: 2.5,
+    9: 5.0,
+    10: 10.0
+  }
+
+  const max_new_tokens_lookup: Record<number, number> = {
+    1: 45,
+    2: 45,
+    3: 50,
+    4: 55,
+    5: 60,
+    6: 70,
+    7: 90,
+    8: 100,
+    9: 150,
+    10: 255
+  }
+
+  const top_p_lookup: Record<number, number> = {
+    1: 0.1,
+    2: 1.0,
+    3: 1.3,
+    4: 1.5,
+    5: 1.6,
+    6: 1.75,
+    7: 2.0,
+    8: 3.0,
+    9: 5.0,
+    10: 15.0
+  }
+
+  const chosensubject_lookup: Record<string, string> = {
+    "humanoid": "fantasy character",
+    "manwomanrelation": "person",
+    "manwomanmultiple": "people",
+    "firstname": "",
+    "job": "person",
+    "fictional": "fictional character",
+    "non fictional": "person",
+    "human": "person",
+    "animal": "animal",
+    "animal as human": "human creature",
+    "landscape": "landscape",
+    "concept": "concept",
+    "event": "concept",
+    //"concept": "concept",
+    "poemline": "concept",
+    "songline": "concept",
+    "cardname": "concept",
+    "episodetitle": "concept",
+    "generic objects": "object",
+    "vehicles": "vehicle",
+    "food": "food",
+    "building": "building",
+    "space": "space",
+    "flora": "nature",
+  }
+  // for insanitylevel in range(1,11):
+  let j = 0
+  let temperature = temperature_lookup[insanitylevel] ?? 0.5
+  let max_new_tokens = 512
+  if(setnewtokens < 1)
+    max_new_tokens = max_new_tokens_lookup[insanitylevel] ?? 70
+  else
+    max_new_tokens = setnewtokens
+  let top_p = top_p_lookup[insanitylevel] ?? 1.6
+  let subject_to_generate = chosensubject_lookup[chosensubject] ?? ""
+
+  const translation_table_remove_stuff = '.,:()<>|[]"" '
+  const translation_table_remove_numbers = '0123456789:()<>|[]""'
+
+    // check if its matching all words from the override:
+  let possible_words_to_check = [...override_subject.toLowerCase().split(' '), ...override_outfit.toLowerCase().split(' ')]
+  //console.log(possible_words_to_check)
+  const words_to_check: string[] = []
+  const words_to_remove = ['subject', 'solo', '1girl', '1boy']
+  for (let word of possible_words_to_check) {
+    word = removeCharacters(word, translation_table_remove_stuff)
+    //console.log(word)
+    if (!words_to_remove.includes(word)) {
+      if ((!word.startsWith("-") && !word.endsWith("-")) && (!word.startsWith("_") && !word.endsWith("_")))
+        words_to_check.push(word)
+    } 
+  }
+
+  //console.log(words_to_check)
+  if (!["humanoid","firstname","job","fictional","non fictional","human"].includes(chosensubject))
+      gender = ""
+  if(superpromptstyle == "" || superpromptstyle == "all") {
+    if (restofprompt.includes("fantasy") || restofprompt.includes("d&d") || restofprompt.includes("dungeons and dragons") || restofprompt.includes("dungeons and dragons"))
+      superpromptstyle = "fantasy style"
+    else if (restofprompt.includes("sci-fi") || restofprompt.includes("scifi") || restofprompt.includes("science fiction"))
+      superpromptstyle = randomChoice(["sci-fi style","futuristic"])
+    else if (restofprompt.includes("cyberpunk"))
+      superpromptstyle = "cyberpunk"
+    else if (restofprompt.includes("horror"))
+      superpromptstyle = "horror themed"
+    else if (restofprompt.includes("evil"))
+      superpromptstyle = "evil"
+    else if (restofprompt.includes("cinestill") || restofprompt.includes("movie still") || restofprompt.includes("cinematic") || restofprompt.includes("epic"))
+      superpromptstyle = randomChoice(["cinematic","epic"])
+    else if (restofprompt.includes("fashion"))
+      superpromptstyle = randomChoice(["elegant","glamourous"])
+    else if (restofprompt.includes("cute") || restofprompt.includes("adorable") || restofprompt.includes("kawaii"))
+      superpromptstyle = randomChoice(["cute","adorable", "kawaii"])
+    else
+      superpromptstyle = randomChoice(superprompterstyleslist)
+  }
+
+  if(words_to_check)
+    question += "Make sure the subject is used: " + words_to_check.join(', ') + " \n"
+
+  let imagetype = ""
+  if (restofprompt.includes("portrait"))
+    imagetype = "a portrait"
+  else if (restofprompt.includes("painting"))
+    imagetype = "a painting"
+  else if (restofprompt.includes("digital art"))
+    imagetype = "a digital artwork"
+  else if (restofprompt.includes("concept"))
+    imagetype = "concept art"
+  else if (restofprompt.includes("pixel"))
+    imagetype = "pixel art"
+  else if (restofprompt.includes("game"))
+    imagetype = "video game artwork"
+  
+  if (imagetype != "" && (normal_dist(insanitylevel) || usestyle))
+    question += "Expand the following " + gender + " " + subject_to_generate + " prompt to describe " + superpromptstyle + " " + imagetype + ": "
+  else if (imagetype != "")
+    question += "Expand the following " + gender + " " + subject_to_generate + " prompt to describe " + imagetype + ": "
+  else if(normal_dist(insanitylevel) || usestyle)
+    question += "Expand the following " + gender + " " + subject_to_generate + " prompt to make it more " + superpromptstyle
+  else
+    question += "Expand the following " + gender + " " + subject_to_generate + " prompt to add more detail: "
+
+
+
+  prompt = removeCharacters(prompt, translation_table_remove_numbers)
+
+  let superpromptresult = ''
+
+  while (!done) {
+    //console.log(seed)
+    //console.log(temperature)
+    //console.log(top_p)
+    //console.log(question)
+    //console.log("chosen subject: " + chosensubject)
+    
+    await load_model_promise
+    superpromptresult = await answerBySuperprompt(question + prompt, max_new_tokens, 2.0, temperature, top_p, 10, seed)
+
+    //console.log("orignal: " + prompt)
+    //console.log("insanitylevel: " + str(insanitylevel))
+    //console.log("")
+    //console.log("complete superprompt: " + superpromptresult)
+    //console.log("")
+
+    // Find the indices of the nearest period and comma
+    const period_index = superpromptresult.lastIndexOf('.')
+    const comma_index = superpromptresult.lastIndexOf(',')
+
+    // Determine the index to cut off the string
+    const cut_off_index = Math.max(period_index, comma_index)
+
+    // Cut off the string at the determined index
+    if (cut_off_index != -1)  // If either period or comma exists
+      superpromptresult = superpromptresult.slice(0, cut_off_index + 1)  // Include the period or comma
+    else
+      superpromptresult = superpromptresult  // If neither period nor comma exists, keep the entire text
+
+    // piercing green eyes problem
+    // basically, the model has some biasses, lets get rid of it, OBP style!
+    if(common_dist(insanitylevel) && remove_bias) // but not always
+        superpromptresult = await remove_superprompt_bias(superpromptresult=superpromptresult, insanitylevel=insanitylevel, override_outfit=override_outfit)
+        
+    
+    //console.log(words_to_check)
+    // Iterate through each word and check if it exists in the other string
+    let i = 0
+    for (const word of words_to_check) {
+      if (!superpromptresult.toLowerCase().includes(word)  && word != "subject")
+        i += 1
+    }
+            
+    
+    if(i == 0 || j == 20 || insanitylevel >= 9)
+      done = true
+    // slowly converge and change
+    else {
+      seed += 100
+      j += 1
+      if(temperature < 0.5)
+        temperature += 0.05 + Number((1 / randint(15,25)).toFixed(2))
+      else
+        temperature -= 0.1
+
+      if(top_p < 1.0)
+        top_p += 0.2 + Number((1 / randint(25,35)).toFixed(2))
+      else
+        top_p -= 0.3
+      max_new_tokens += 3
+      console.log("")
+      console.log(randomChoice(devmessagessuperpromptlist) + "... Retrying...")
+      console.log("")
+    }
+  }
+          
+      
+
+  superpromptresult += " " + allLoRA.join(" ")
+
+  return superpromptresult
 }
 
 
@@ -424,7 +1122,7 @@ function replacewildcard(
 // forcesubject van be used to force a certain type of subject
 // Set artistmode to none, to exclude artists
 
-async function build_dynamic_prompt(
+export async function build_dynamic_prompt(
   insanitylevel = 5,
   forcesubject = "all",
   artists = "all",
@@ -507,7 +1205,7 @@ async function build_dynamic_prompt(
   if(OBP_preset == OBPresets.RANDOM_PRESET_OBP) {
     const obp_options = await OBPresets.load_obp_presets();
     const random_preset_keys = Object.keys(obp_options);
-    const random_preset = random_preset_keys[Math.floor(Math.random() * random_preset_keys.length)];
+    const random_preset = randomChoice(random_preset_keys);
     console.log("Engaging randomized presets, locking on to: " + random_preset);
 
     selected_opb_preset = OBPresets.get_obp_preset(random_preset);
@@ -617,7 +1315,7 @@ async function build_dynamic_prompt(
   // first build up a complete anti list. Those values are removing during list building
   // this uses the antivalues string AND the antilist.csv
   const emptylist: never[] = [];
-  let antilist = (await csv_to_list("antilist", emptylist, "./userfiles/", 1)) as string[];
+  let antilist = (await csv_to_list("antilist", emptylist, "/userfiles/", 1)) as string[];
   
   const antivaluelist = antivalues.split(",");
 
@@ -656,7 +1354,7 @@ async function build_dynamic_prompt(
   const locationlist = await csv_to_list("locations",antilist)
   const backgroundlist = await csv_to_list("backgrounds",antilist)
 
-  const accessorielist = await csv_to_list("accessories",antilist,"./csvfiles/",0,"?",false,false,gender)
+  const accessorielist = await csv_to_list("accessories",antilist,"/csvfiles/",0,"?",false,false,gender)
   const artmovementlist = await csv_to_list("artmovements",antilist)
   const bodytypelist = await csv_to_list_({csvfilename:"body_types",antilist,skipheader:true,gender})
   const cameralist = await csv_to_list("cameras",antilist)
@@ -672,7 +1370,7 @@ async function build_dynamic_prompt(
   const greatworklist = await csv_to_list("greatworks",antilist)
   const haircolorlist = await csv_to_list("haircolors",antilist)
   const hairstylelist = await csv_to_list("hairstyles",antilist)
-  const hairvomitlist = await csv_to_list("hairvomit",antilist,"./csvfiles/",0,"?",false,false)
+  const hairvomitlist = await csv_to_list("hairvomit",antilist,"/csvfiles/",0,"?",false,false)
   
   const humanoidlist = await csv_to_list("humanoids",antilist) // build_dynamic_prompt.py LINE244
   let imagetypelist = [];
@@ -705,7 +1403,7 @@ async function build_dynamic_prompt(
 
     vomitlist.forEach((vomit,i) => {
       for (const [key, value] of Object.entries(replacements)) {
-        vomitlist[i] = vomit.toString().replace(key, value);
+        vomitlist[i] = vomit.toString().replaceAll(key, value);
       }
     });
   } // build_dynamic_prompt.py LINE273
@@ -713,7 +1411,7 @@ async function build_dynamic_prompt(
   const foodlist = await csv_to_list("foods", antilist)
   const genderdescriptionlist = await csv_to_list_({csvfilename:"genderdescription",antilist,skipheader:true,gender})
   const minilocationlist = await csv_to_list("minilocations", antilist)
-  const minioutfitlist = await csv_to_list("minioutfits",antilist,"./csvfiles/",0,"?",false,false,gender)
+  const minioutfitlist = await csv_to_list("minioutfits",antilist,"/csvfiles/",0,"?",false,false,gender)
   const seasonlist = await csv_to_list("seasons", antilist)
   const elaborateoutfitlist = await csv_to_list("elaborateoutfits", antilist)
   const minivomitlist = await csv_to_list("minivomit", antilist)
@@ -894,7 +1592,7 @@ async function build_dynamic_prompt(
     artistlist = await artist_category_csv_to_list("artists_and_category",artists)
   else if(artists.startsWith("personal_artists") || artists.startsWith("personal artists")) {
     artists = artists.replaceAll(" ","_") // add underscores back in
-    artistlist = await csv_to_list(artists,antilist,"./userfiles/")
+    artistlist = await csv_to_list(artists,antilist,"/userfiles/")
   } else if (artists != "none")
     artistlist = await csv_to_list("artists",antilist) // build_dynamic_prompt.py LINE 429
 
@@ -912,66 +1610,66 @@ async function build_dynamic_prompt(
   const digitalartistlist = await artist_category_csv_to_list("artists_and_category","digital")
   const architectartistlist = await artist_category_csv_to_list("artists_and_category","architecture")
   const cinemaartistlist = await artist_category_csv_to_list("artists_and_category","cinema")
-  const gregmodelist = await csv_to_list("gregmode", antilist)
+  const gregmodelist = (await csv_to_list("gregmode", antilist)) as string[]
 
 
   // add any other custom lists
-  const stylestiloralist = await csv_to_list("styles_ti_lora",antilist,"./userfiles/")
+  const stylestiloralist = await csv_to_list("styles_ti_lora",antilist,"/userfiles/")
   const generatestyle = Boolean(stylestiloralist?.length)
 
-  const custominputprefixlist = await csv_to_list("custom_input_prefix",antilist,"./userfiles/")
+  const custominputprefixlist = await csv_to_list("custom_input_prefix",antilist,"/userfiles/")
   let generatecustominputprefix = Boolean(custominputprefixlist?.length)
 
-  const custominputmidlist = await csv_to_list("custom_input_mid",antilist,"./userfiles/")
+  const custominputmidlist = await csv_to_list("custom_input_mid",antilist,"/userfiles/")
   const generatecustominputmid = Boolean(custominputmidlist?.length)
 
-  const custominputsuffixlist = await csv_to_list("custom_input_suffix",antilist,"./userfiles/")
+  const custominputsuffixlist = await csv_to_list("custom_input_suffix",antilist,"/userfiles/")
   const generatecustominputsuffix = Boolean(custominputsuffixlist?.length)
 
-  const customsubjectslist = await csv_to_list("custom_subjects",antilist,"./userfiles/")
-  const customoutfitslist = await csv_to_list("custom_outfits",antilist,"./userfiles/")
+  const customsubjectslist = await csv_to_list("custom_subjects",antilist,"/userfiles/")
+  const customoutfitslist = await csv_to_list("custom_outfits",antilist,"/userfiles/")
 
   // special lists
-  const backgroundtypelist = await csv_to_list("backgroundtypes", antilist,"./csvfiles/special_lists/",0,"?")
-  const insideshotlist = await csv_to_list("insideshots", antilist,"./csvfiles/special_lists/",0,"?")
-  const photoadditionlist = await csv_to_list("photoadditions", antilist,"./csvfiles/special_lists/",0,"?")
+  const backgroundtypelist = await csv_to_list("backgroundtypes", antilist,"/csvfiles/special_lists/",0,"?")
+  const insideshotlist = await csv_to_list("insideshots", antilist,"/csvfiles/special_lists/",0,"?")
+  const photoadditionlist = await csv_to_list("photoadditions", antilist,"/csvfiles/special_lists/",0,"?")
   let buildhairlist = [], buildoutfitlist = [], humanadditionlist = [], objectadditionslist = [],
     buildfacelist = [], buildaccessorielist = [], humanactivitylist = [], humanexpressionlist = [];
   if(less_verbose) {
-    buildhairlist = await csv_to_list("buildhair_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    buildoutfitlist = await csv_to_list("buildoutfit_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    humanadditionlist = await csv_to_list("humanadditions_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    objectadditionslist = await csv_to_list("objectadditions_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    buildfacelist = await csv_to_list("buildface_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    buildaccessorielist = await csv_to_list("buildaccessorie_less_verbose", antilist,"./csvfiles/special_lists/",0,"?")
-    humanactivitylist = await csv_to_list("human_activities_less_verbose",antilist,"./csvfiles/",0,"?",false,false)
-    humanexpressionlist = await csv_to_list("humanexpressions_less_verbose",antilist,"./csvfiles/",0,"?",false,false)
+    buildhairlist = await csv_to_list("buildhair_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    buildoutfitlist = await csv_to_list("buildoutfit_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    humanadditionlist = await csv_to_list("humanadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    objectadditionslist = await csv_to_list("objectadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    buildfacelist = await csv_to_list("buildface_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    buildaccessorielist = await csv_to_list("buildaccessorie_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
+    humanactivitylist = await csv_to_list("human_activities_less_verbose",antilist,"/csvfiles/",0,"?",false,false)
+    humanexpressionlist = await csv_to_list("humanexpressions_less_verbose",antilist,"/csvfiles/",0,"?",false,false)
   } else {
-    buildhairlist = await csv_to_list("buildhair", antilist,"./csvfiles/special_lists/",0,"?")
-    buildoutfitlist = await csv_to_list("buildoutfit", antilist,"./csvfiles/special_lists/",0,"?")
-    humanadditionlist = await csv_to_list("humanadditions", antilist,"./csvfiles/special_lists/",0,"?")
-    objectadditionslist = await csv_to_list("objectadditions", antilist,"./csvfiles/special_lists/",0,"?")
-    buildfacelist = await csv_to_list("buildface", antilist,"./csvfiles/special_lists/",0,"?")
-    buildaccessorielist = await csv_to_list("buildaccessorie", antilist,"./csvfiles/special_lists/",0,"?")
-    humanactivitylist = await csv_to_list("human_activities",antilist,"./csvfiles/",0,"?",false,false)
-    humanexpressionlist = await csv_to_list("humanexpressions",antilist,"./csvfiles/",0,"?",false,false)
+    buildhairlist = await csv_to_list("buildhair", antilist,"/csvfiles/special_lists/",0,"?")
+    buildoutfitlist = await csv_to_list("buildoutfit", antilist,"/csvfiles/special_lists/",0,"?")
+    humanadditionlist = await csv_to_list("humanadditions", antilist,"/csvfiles/special_lists/",0,"?")
+    objectadditionslist = await csv_to_list("objectadditions", antilist,"/csvfiles/special_lists/",0,"?")
+    buildfacelist = await csv_to_list("buildface", antilist,"/csvfiles/special_lists/",0,"?")
+    buildaccessorielist = await csv_to_list("buildaccessorie", antilist,"/csvfiles/special_lists/",0,"?")
+    humanactivitylist = await csv_to_list("human_activities",antilist,"/csvfiles/",0,"?",false,false)
+    humanexpressionlist = await csv_to_list("humanexpressions",antilist,"/csvfiles/",0,"?",false,false)
   }
 
   humanactivitylist = [...humanactivitylist, ...humanactivitycheatinglist]
 
-  const animaladditionlist = await csv_to_list("animaladditions", antilist,"./csvfiles/special_lists/",0,"?")
+  const animaladditionlist = await csv_to_list("animaladditions", antilist,"/csvfiles/special_lists/",0,"?")
   
-  const minilocationadditionslist = await csv_to_list("minilocationadditions", antilist,"./csvfiles/special_lists/",0,"?")
-  const overalladditionlist = await csv_to_list("overalladditions", antilist,"./csvfiles/special_lists/",0,"?")
-  let imagetypemodelist = await csv_to_list("imagetypemodes", antilist,"./csvfiles/special_lists/",0,"?")
-  const miniactivitylist = await csv_to_list("miniactivity", antilist,"./csvfiles/special_lists/",0,"?")
-  const animalsuffixadditionlist = await csv_to_list("animalsuffixadditions", antilist,"./csvfiles/special_lists/",0,"?")
-  const buildfacepartlist = await csv_to_list("buildfaceparts", antilist,"./csvfiles/special_lists/",0,"?")
-  const conceptmixerlist = await csv_to_list("conceptmixer", antilist,"./csvfiles/special_lists/",0,"?")
+  const minilocationadditionslist = await csv_to_list("minilocationadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const overalladditionlist = await csv_to_list("overalladditions", antilist,"/csvfiles/special_lists/",0,"?")
+  let imagetypemodelist = await csv_to_list("imagetypemodes", antilist,"/csvfiles/special_lists/",0,"?")
+  const miniactivitylist = await csv_to_list("miniactivity", antilist,"/csvfiles/special_lists/",0,"?")
+  const animalsuffixadditionlist = await csv_to_list("animalsuffixadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const buildfacepartlist = await csv_to_list("buildfaceparts", antilist,"/csvfiles/special_lists/",0,"?")
+  const conceptmixerlist = await csv_to_list("conceptmixer", antilist,"/csvfiles/special_lists/",0,"?")
   
   
-  const tokinatorlist = await csv_to_list("tokinator", antilist,"./csvfiles/templates/",0,"?")
-  const styleslist = await csv_to_list("styles", antilist,"./csvfiles/templates/",0,"?")
+  const tokinatorlist = await csv_to_list("tokinator", antilist,"/csvfiles/templates/",0,"?")
+  const styleslist = await csv_to_list("styles", antilist,"/csvfiles/templates/",0,"?")
   const stylessuffix = styleslist.map(it => it.toString().split('-subject-')[1]) //[item.split('-subject-')[1] for item in styleslist]
   const breakstylessuffix = stylessuffix.map(item => item.split(',')) //[item.split(',') for item in stylessuffix]
   let allstylessuffixlist = breakstylessuffix.flat()
@@ -983,8 +1681,8 @@ async function build_dynamic_prompt(
   artiststylessuffixlist = Array.from(new Set(artiststylessuffixlist))
   allstylessuffixlist = [...allstylessuffixlist, ...artiststylessuffixlist]
   
-  let dynamictemplatesprefixlist = await csv_to_list("dynamic_templates_prefix", antilist,"./csvfiles/templates/",0,"?")
-  const dynamictemplatessuffixlist = await csv_to_list("dynamic_templates_suffix", antilist,"./csvfiles/templates/",0,"?") // build_dynamic_prompt.py LINE 516
+  let dynamictemplatesprefixlist = await csv_to_list("dynamic_templates_prefix", antilist,"/csvfiles/templates/",0,"?")
+  let dynamictemplatessuffixlist = await csv_to_list("dynamic_templates_suffix", antilist,"/csvfiles/templates/",0,"?") // build_dynamic_prompt.py LINE 516
 
   // subjects
   let mainchooserlist: string[] = []
@@ -1880,35 +2578,35 @@ async function build_dynamic_prompt(
       .map(it => it.toLowerCase())
       .some(it => vomitlist.map(it => it.toString().toLowerCase()).includes(it))
     if(foundinlist)
-        generatevomit = false
+      generatevomit = false
 
     // directionlist
     foundinlist = givensubjectlist
       .map(it => it.toLowerCase())
       .some(it => directionlist.map(it => it.toString().toLowerCase()).includes(it))
     if(foundinlist)
-        generatedirection = false
+      generatedirection = false
 
     // focus
     foundinlist = givensubjectlist
       .map(it => it.toLowerCase())
       .some(it => focuslist.map(it => it.toString().toLowerCase()).includes(it))
     if(foundinlist)
-        generatefocus = false
+      generatefocus = false
 
     // artmovementlist
     foundinlist = givensubjectlist
       .map(it => it.toLowerCase())
       .some(it => artmovementlist.map(it => it.toString().toLowerCase()).includes(it))
     if(foundinlist)
-        generateartmovement = false
+      generateartmovement = false
     
     // camera
     foundinlist = givensubjectlist
       .map(it => it.toLowerCase())
       .some(it => cameralist.map(it => it.toString().toLowerCase()).includes(it))
     if(foundinlist)
-        generatecamera = false
+      generatecamera = false
 
     // colorschemelist
     foundinlist = givensubjectlist
@@ -1931,6 +2629,9 @@ async function build_dynamic_prompt(
   let promptstocompound = Number(promptcompounderlevel)
   let compoundcounter = 0 // build_dynamic_prompt.py LINE 1395
 
+  let subjectchooser = ""
+  let mainchooser = ""
+
   while (compoundcounter < promptstocompound) {
     let isphoto = 0
     let othertype = 0
@@ -1942,19 +2643,20 @@ async function build_dynamic_prompt(
     let artistmode = "normal"
     let insideshot = 0
     let buildingfullmode = false
-    let subjectchooser = ""
-    let mainchooser = ""
+    mainchooser = ''
+    subjectchooser = ''
 
     let artistbylist: string[] = []
 
     let chosenstylesuffix = ''
+    let chosenstyleprefix = ''
   
     //completeprompt += prefixprompt
 
     completeprompt += ", " // build_dynamic_prompt.py LINE 1413
 
     if(templatemode) {
-      const templatelist = (await csv_to_list("templates", antilist,"./csvfiles/templates/",1,";",true)) as string[][]
+      const templatelist = (await csv_to_list("templates", antilist,"/csvfiles/templates/",1,";",true)) as string[][]
 
             
       // templateenvironments = [templateenvironment[1] for templateenvironment in templatelist]
@@ -1986,11 +2688,11 @@ async function build_dynamic_prompt(
 
       // if there is a subject override, then replace the subject with that
       if(givensubject=="")
-        completeprompt += chosentemplate.replace("-subject-",templatesubjects[templateindex] )
+        completeprompt += chosentemplate.replaceAll("-subject-",templatesubjects[templateindex] )
       else if(givensubject != "" && !subjectingivensubject)
-        completeprompt += chosentemplate.replace("-subject-",givensubject )
+        completeprompt += chosentemplate.replaceAll("-subject-",givensubject )
       else if(givensubject != "" && subjectingivensubject)
-        completeprompt += chosentemplate.replace("-subject-", givensubjectpromptlist[0] + " " + templatesubjects[templateindex] + " " + givensubjectpromptlist[1])
+        completeprompt += chosentemplate.replaceAll("-subject-", givensubjectpromptlist[0] + " " + templatesubjects[templateindex] + " " + givensubjectpromptlist[1])
     } // build_dynamic_prompt.py LINE 1445
 
     // custom prefix list
@@ -2414,14 +3116,11 @@ async function build_dynamic_prompt(
         }
       }
 
-
-
       if(doartistnormal) {
         // take 1-3 artists, weighted to 1-2
         let step = randint(0, 1)
         let minstep = step
         let end = randint(1, insanitylevel3)
-
 
         // determine artist mode:
         // normal
@@ -2430,9 +3129,6 @@ async function build_dynamic_prompt(
         // adding at step x  a:X
         // stopping at step x ::X
         // enhancing from step  x
-
-
-
 
         const modeselector = randint(0,10)
         if (modeselector < 5 && end - step >= 2) {
@@ -2512,21 +3208,21 @@ async function build_dynamic_prompt(
         completeprompt = parse_custom_functions(completeprompt, insanitylevel)
 
         // replace artist wildcards
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-artist-", artistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-gregmode-", gregmodelist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-artist-", artistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-gregmode-", gregmodelist, false, false)
 
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-fantasyartist-", fantasyartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-popularartist-", popularartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-romanticismartist-", romanticismartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-photographyartist-", photographyartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-portraitartist-", portraitartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-characterartist-", characterartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-landscapeartist-", landscapeartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-scifiartist-", scifiartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-graphicdesignartist-", graphicdesignartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-digitalartist-", digitalartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-architectartist-", architectartistlist, false, false)
-        completeprompt = replacewildcard(completeprompt, insanitylevel, "-cinemaartist-", cinemaartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-fantasyartist-", fantasyartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-popularartist-", popularartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-romanticismartist-", romanticismartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-photographyartist-", photographyartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-portraitartist-", portraitartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-characterartist-", characterartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-landscapeartist-", landscapeartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-scifiartist-", scifiartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-graphicdesignartist-", graphicdesignartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-digitalartist-", digitalartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-architectartist-", architectartistlist, false, false)
+        completeprompt = await replacewildcard(completeprompt, insanitylevel, "-cinemaartist-", cinemaartistlist, false, false)
             
         // clean it up
         completeprompt = cleanup(completeprompt, advancedprompting, insanitylevel)
@@ -2558,33 +3254,30 @@ async function build_dynamic_prompt(
         tokinatorsubtype = ["(1girl, solo)"]
       if(chance_roll(insanitylevel,"normal")) {
         if(chance_roll(insanitylevel,"normal") && remove_weights == false)
-          completeprompt += "(OR(;-imagetypequality-;uncommon) OR(-imagetype-;-othertype-;rare):1.3) "
+          completeprompt += "(OR(;-imagetypequality-;uncommon) OR(-imagetype-;-othertype-;rare)1.3) "
         else
           completeprompt += "OR(;-imagetypequality-;uncommon) OR(-imagetype-;-othertype-;rare) "
       }
       completeprompt += randomChoice(tokinatorlist)
-      completeprompt = completeprompt.replace("-tokensubtype-", randomChoice(tokinatorsubtype))
+      completeprompt = completeprompt.replaceAll("-tokensubtype-", randomChoice(tokinatorsubtype))
 
       if(givensubject.includes("subject") && smartsubject)
-        givensubject = givensubject.replace("subject", "-token-")
+        givensubject = givensubject.replaceAll("subject", "-token-")
 
       if(givensubject == "" && overrideoutfit == "")
-        completeprompt = completeprompt.replace("-subject-", "-token-")
+        completeprompt = completeprompt.replaceAll("-subject-", "-token-")
       else if(givensubject == "" && overrideoutfit != "" &&  !completeprompt.includes("-outfit-"))
-        completeprompt = completeprompt.replace("-subject-", "-token- wearing a OR(-token-;;normal) -outfit-")
+        completeprompt = completeprompt.replaceAll("-subject-", "-token- wearing a OR(-token-;;normal) -outfit-")
       else if(givensubject != "" && overrideoutfit != "" &&  !completeprompt.includes("-outfit-"))
-        completeprompt = completeprompt.replace("-subject-", givensubject + " wearing a OR(-token-;;normal) -outfit-")
+        completeprompt = completeprompt.replaceAll("-subject-", givensubject + " wearing a OR(-token-;;normal) -outfit-")
       else
-        completeprompt = completeprompt.replace("-subject-", givensubject)
+        completeprompt = completeprompt.replaceAll("-subject-", givensubject)
       
       if(overrideoutfit == "")
-        completeprompt = completeprompt.replace("-outfit-", "-token-")
+        completeprompt = completeprompt.replaceAll("-outfit-", "-token-")
       else
-        completeprompt = completeprompt.replace("-outfit-", overrideoutfit)
+        completeprompt = completeprompt.replaceAll("-outfit-", overrideoutfit)
     } // build_dynamic_prompt.py LINE 2002
-
-        
-
 
     // start image type
     // @ts-ignore
@@ -2692,7 +3385,1621 @@ async function build_dynamic_prompt(
 
     // divider between subject and everything else
     completeprompt += " @@@ " // build_dynamic_prompt.py LINE 2111
+    let genjoboractivitylocation = ''
+
+    if(generatesubject) {
+      // start with descriptive qualities
             
+      // outfit in front mode?
+      // outfitmode = 0 = NO
+      // outfitmode = 1 IN FRONT
+      // outfitmode = 2 IS NORMAL
+      if(overrideoutfit!="")
+          outfitmode = 2
+      if(animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"] && chance_roll(insanitylevel, outfitchance) && generateoutfit && humanspecial != 1) {
+        if(randint(0,10)==0)
+          outfitmode = 1
+        else
+          outfitmode = 2
+      }
+      
+      if(outfitmode == 1) {
+        completeprompt += "OR(wearing;dressed in;in;normal) OR(;OR(;a very;rare) -outfitdescriptor-;normal) OR(;-color-;uncommon) OR(;-culture-;uncommon) OR(;-material-;rare) -outfit-, "
+        if(extraordinary_dist(insanitylevel))
+          completeprompt += " -outfitvomit-, "
+      }
+      
+
+
+      if(subjectingivensubject)
+        completeprompt += " " + givensubjectpromptlist[0] + " "
+
+      // Once in a very rare while, we get a ... full of ...s
+      if(novel_dist(insanitylevel) && (animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","firstname"])) {
+        buildingfullmode = true
+        insideshot = 1
+        heshelist = ["they"]
+        hisherlist = ["their"]
+        himherlist = ["them"]
+        completeprompt += "a OR(-building-;-location-;-waterlocation-;-container-;-background-;rare) full of "
+      } // build_dynamic_prompt.py LINE 2146
+
+      // Sometimes the descriptors are at the back, in more natural language. Lets determine.
+      let descriptorsintheback = randint(0,2)
+      if(descriptorsintheback < 2) {
+        // Common to have 1 description, uncommon to have 2
+        if(chance_roll(insanitylevel, subjectdescriptor1chance) && generatedescriptors) {
+          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) {
+            if(anime_mode && randint(0,2) < 2)
+              completeprompt += "-basicbitchdescriptor- "
+            else
+              completeprompt += "-humandescriptor- "
+          }
+          else if(mainchooser == "landscape")
+            completeprompt += "-locationdescriptor- "
+          else if(mainchooser == "animal")
+            completeprompt += "-animaldescriptor- "
+          else
+            completeprompt += "-descriptor- "
+        }
+
+        if(chance_roll(insanitylevel, subjectdescriptor2chance) && generatedescriptors) {
+          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) {
+            if(anime_mode && randint(0,2) < 2)
+              completeprompt += "-basicbitchdescriptor- "
+            else
+              completeprompt += "-humandescriptor- "
+          }
+          else if(mainchooser == "landscape")
+            completeprompt += "-locationdescriptor- "
+          else if(mainchooser == "animal")
+            completeprompt += "-animaldescriptor- "
+          else
+            completeprompt += "-descriptor- "
+        }
+      }
+      
+      // color, for animals, landscape, objects and concepts
+      if(mainchooser in ["animal", "object", "landscape", "concept"] && unique_dist(insanitylevel))
+        completeprompt += " OR(-color-;-colorcombination-) "
+      
+      // age, very rare to add.
+      if(subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"] && extraordinary_dist(insanitylevel))
+        completeprompt += randint(20,99) + " OR(y.o.;year old) "
+
+      if((animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) && chance_roll(insanitylevel, subjectbodytypechance) && generatebodytype)
+        completeprompt += "-bodytype- "
+
+      if((animalashuman || subjectchooser in ["object","human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) && chance_roll(insanitylevel, subjectculturechance) && generatedescriptors)
+        completeprompt += "-culture- "
+
+      if(mainchooser == "object"){
+        // first add a wildcard that can be used to create prompt strenght
+        completeprompt += " -objectstrengthstart-"
+        // if we have an overwrite, then make sure we only take the override
+        if(subtypeobject != "all") {
+          if(subtypeobject == "generic objects")
+            objectwildcardlist = ["-object-"]
+          if(subtypeobject == "vehicles")
+              objectwildcardlist = ["-vehicle-"]
+          if(subtypeobject == "food")
+              objectwildcardlist = ["-food-"]
+          if(subtypeobject == "buildings")
+              objectwildcardlist = ["-building-"]
+          if(subtypeobject == "space")
+              objectwildcardlist = ["-space-"]
+          if(subtypeobject == "flora")
+              objectwildcardlist = ["-flora-"]
+          // not varied enough
+          //if(subtypeobject == "occult")
+          //    objectwildcardlist = ["-occult-"]
+          subjectchooser = subtypeobject
+        }
+
+        // if we have a given subject, we should skip making an actual subject
+        // unless we have "subject" in the given subject
+        
+
+        if(givensubject == "" || (subjectingivensubject && givensubject != "")) {
+          if(rare_dist(insanitylevel) && advancedprompting) {
+            const hybridorswaplist = ["hybrid", "swap"]
+            hybridorswap = randomChoice(hybridorswaplist)
+            completeprompt += "["
+          }
+
+          const chosenobjectwildcard = randomChoice(objectwildcardlist)
+
+          completeprompt += chosenobjectwildcard + " "
+
+          if(hybridorswap == "hybrid") {
+            if(uncommon_dist(insanitylevel))
+              completeprompt += "|" + randomChoice(objectwildcardlist) + "] "
+            else {
+              completeprompt += "|" 
+              completeprompt += chosenobjectwildcard + " "
+              completeprompt += "] "
+            }
+          }
+          if(hybridorswap == "swap") {
+            if(uncommon_dist(insanitylevel))
+              completeprompt += ":" + randomChoice(objectwildcardlist) + ":" + randint(1,5) +  "] "
+            else {
+              completeprompt += ":"
+              completeprompt += chosenobjectwildcard + " "
+              completeprompt += ":" + randint(1,5) +  "] "
+            }
+          }
+        } else
+          completeprompt += " " + givensubject + " "
+        
+        hybridorswap = ""
+      }
+
+      if(mainchooser == "animal") {
+        // first add a wildcard that can be used to create prompt strenght
+        completeprompt += " -objectstrengthstart-"
+        if(anime_mode 
+            &&  !givensubject.includes("1girl")
+            &&  !givensubject.includes("1boy")
+        ) {
+          const anthrolist = ["anthro", "anthrophomorphic", "furry"]
+      
+              
+          if(gender=="male")
+            completeprompt += randomChoice(anthrolist) + ", 1boy, solo, "
+          else
+            completeprompt += randomChoice(anthrolist) + ", 1girl, solo, "
+        }
+        
+        // if we have a given subject, we should skip making an actual subject
+        if(givensubject == "" || (subjectingivensubject && givensubject != "")) {
+          if(subtypeanimal != "all") {
+            if(subtypeanimal=="generic animal")
+              animalwildcardlist = ["-animal-"]
+            else if(subtypeanimal=="bird")
+                animalwildcardlist = ["-bird-"]
+            else if(subtypeanimal=="cat")
+                animalwildcardlist = ["-cat-"]
+            else if(subtypeanimal=="dog")
+                animalwildcardlist = ["-dog-"]
+            else if(subtypeanimal=="insect")
+                animalwildcardlist = ["-insect-"]
+            else if(subtypeanimal=="pokemon")
+                animalwildcardlist = ["-pokemon-"]
+            else if(subtypeanimal=="marine life")
+                animalwildcardlist = ["-marinelife-"]
+          }
+
+          
+          const chosenanimalwildcard = randomChoice(animalwildcardlist)
+
+          if(rare_dist(insanitylevel) && advancedprompting) {
+            const hybridorswaplist = ["hybrid", "swap"]
+            hybridorswap = randomChoice(hybridorswaplist)
+            completeprompt += "["
+          }
+              
+          if(unique_dist(insanitylevel) && generateanimaladdition)
+              animaladdedsomething = 1
+              completeprompt += "-animaladdition- " + chosenanimalwildcard + " "
+          if(animaladdedsomething != 1)
+              completeprompt += chosenanimalwildcard + " "
+
+          
+
+          if(hybridorswap == "hybrid")
+              if(uncommon_dist(insanitylevel))
+                  completeprompt += "|" + randomChoice(hybridlist) + "] "
+              else
+                  completeprompt += "| " + chosenanimalwildcard +  " ] "
+          if(hybridorswap == "swap")
+              if(uncommon_dist(insanitylevel))
+                  completeprompt += ":" + randomChoice(hybridlist) + ":" + randint(1,5) +  "] "
+              else
+                  completeprompt += ":" + chosenanimalwildcard +  ":" + randint(1,5) +  "] "
+        } else
+          completeprompt += " " + givensubject + " "
+        
+        hybridorswap = ""
+      }
+
+      // move job or activity logic here. We want to place it at 2 different places maybe
+      
+      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"])  && chance_roll(insanitylevel, joboractivitychance) && humanspecial != 1 && generatesubject) {
+        genjoboractivity = true
+        const genjoboractivitylocationslist = ["front","middle", "middle","back","back", "back"]
+        genjoboractivitylocation = randomChoice(genjoboractivitylocationslist)
+      }
+
+
+      if(genjoboractivity && genjoboractivitylocation == "front")
+        completeprompt += "-job- " // build_dynamic_prompt.py LINE 2323
+          
+      
+      // if we have a given subject, we should skip making an actual subject
+      if(mainchooser == "humanoid") {
+        // first add a wildcard that can be used to create prompt strenght
+        completeprompt += " -objectstrengthstart-"
+        
+        if(anime_mode 
+            &&  !givensubject.includes("1girl")
+            &&  !givensubject.includes("1boy")
+        ) {
+          if(subjectchooser != "manwomanmultiple") {
+            if(gender=="male")
+              completeprompt += "1boy, solo, "
+            else
+              completeprompt += "1girl, solo, "
+          } else {
+            if(gender=="male")
+              completeprompt += "multipleboys, "
+            else
+              completeprompt += "multiplegirls, "
+          }
+        }
+        
+        if(givensubject == "" || (subjectingivensubject && givensubject != "")) {
+          if(subjectchooser == "human"&& !anime_mode)
+            completeprompt += "-manwoman-"
+          
+          if(subjectchooser == "manwomanrelation")
+            completeprompt += "-manwomanrelation-"
+
+          if(subjectchooser == "manwomanmultiple")
+            completeprompt += "-manwomanmultiple-"
+
+          if(subjectchooser == "job") {
+            if(!anime_mode)
+              completeprompt += "-malefemale- "
+            completeprompt += "-job-"
+          }
+
+          if(subjectchooser == "fictional") {
+            if(rare_dist(insanitylevel) && advancedprompting && !buildingfullmode) {
+              const hybridorswaplist = ["hybrid", "swap"]
+              hybridorswap = randomChoice(hybridorswaplist)
+              completeprompt += "["
+            }
+          
+            // Sometimes, we do a gender swap. Much fun!
+            if(novel_dist(insanitylevel))
+              completeprompt += gender + " version of -oppositefictional-"
+            else
+              completeprompt += "-fictional-"
+
+            if(hybridorswap == "hybrid")
+                completeprompt += "|" + randomChoice(hybridhumanlist) + " ] "
+            if(hybridorswap == "swap")
+                completeprompt += ":" + randomChoice(hybridhumanlist) + ":" + randint(1,5) +  "] "
+            hybridorswap = ""
+          }
+
+          if(subjectchooser == "non fictional") {
+            if(rare_dist(insanitylevel) && advancedprompting && !buildingfullmode) {
+              const hybridorswaplist = ["hybrid", "swap"]
+              hybridorswap = randomChoice(hybridorswaplist)
+              completeprompt += "["
+            }
+            // Sometimes, we do a gender swap. Much fun!
+            if(novel_dist(insanitylevel))
+              completeprompt += gender + " version of -oppositenonfictional-"
+            else
+              completeprompt += "-nonfictional-"
+
+            if(hybridorswap == "hybrid")
+                completeprompt += "|" + randomChoice(hybridhumanlist) + "] "
+            if(hybridorswap == "swap")
+                completeprompt += ":" + randomChoice(hybridhumanlist) + ":" + randint(1,5) +  "] "
+            hybridorswap = ""
+          }
+
+          if(subjectchooser == "humanoid") {
+            if(gender != "all")
+              completeprompt += "-malefemale- "
+            if(rare_dist(insanitylevel) && advancedprompting && !buildingfullmode) {
+              const hybridorswaplist = ["hybrid", "swap"]
+              hybridorswap = randomChoice(hybridorswaplist)
+              completeprompt += "["
+            }
+            
+            completeprompt += "-humanoid-"
+
+            if(hybridorswap == "hybrid")
+              completeprompt += "|" + randomChoice(hybridhumanlist) + "] "
+            if(hybridorswap == "swap")
+              completeprompt += ":" + randomChoice(hybridhumanlist) + ":" + randint(1,5) +  "] "
+            hybridorswap = ""
+          }
+
+          if(subjectchooser == "firstname") {
+            if(rare_dist(insanitylevel) && advancedprompting && !buildingfullmode) {
+              const hybridorswaplist = ["hybrid", "swap"]
+              hybridorswap = randomChoice(hybridorswaplist)
+              completeprompt += "["
+            }
+          
+            completeprompt += "-firstname-"
+
+            if(hybridorswap == "hybrid")
+                completeprompt += "|" + "-firstname-" + "] "
+            if(hybridorswap == "swap")
+                completeprompt += ":" + "-firstname-" + ":" + randint(1,5) +  "] "
+            hybridorswap = ""
+          }
+
+          if(buildingfullmode)
+            completeprompt += "s"
+
+          completeprompt += " "
+        } else {
+          if(subjectchooser == "manwomanmultiple" && subtypehumanoid != "multiple humans" && !["1girl", "1boy", "solo"].includes(givensubject)) {
+            if(randint(0,1) == 1)
+              completeprompt +=  " " + givensubject + " and a -manwomanmultiple- "
+            else
+              completeprompt +=  " a OR(group;couple;crowd;bunch) of " + givensubject + " "
+          }
+          else
+            completeprompt += " " + givensubject + " " 
+        }
+      } // build_dynamic_subject.py LINE 2436
+
+      
+      // sometimes add a suffix for more fun!
+      if( (mainchooser == "humanoid" || mainchooser == "animal" || mainchooser == "object") && chance_roll(insanitylevel, subjectconceptsuffixchance))
+        completeprompt += " of -conceptsuffix- "
+
+      if(mainchooser == "humanoid" || mainchooser == "animal" || mainchooser == "object")
+        // completion of strenght end
+        completeprompt += "-objectstrengthend-"
+      
+      if(mainchooser == 'animal' && legendary_dist(insanitylevel)) {
+        animaladdedsomething = 1
+        completeprompt += " -animalsuffixaddition- "
+      }
+      
+      
+      if(mainchooser == "landscape") {
+        // first add a wildcard that can be used to create prompt strenght
+        completeprompt += " -objectstrengthstart-"
+        
+        // if we have a given subject, we should skip making an actual subject
+        if(givensubject == "" || (subjectingivensubject && givensubject != "")) {
+          if(rare_dist(insanitylevel) && advancedprompting) {
+            const hybridorswaplist = ["hybrid", "swap"]
+            hybridorswap = randomChoice(hybridorswaplist)
+            completeprompt += "["
+          }
+        
+          if(subtypelocation != "all") {
+            if(subtypelocation=="location")
+              locationwildcardlist = ["-location-"]
+            else if(subtypelocation=="fantasy location")
+              locationwildcardlist = ["-locationfantasy-"]
+            else if(subtypelocation=="videogame location")
+              locationwildcardlist = ["-locationvideogame-"]
+            else if(subtypelocation=="sci-fi location")
+              locationwildcardlist = ["-locationscifi-"]
+            else if(subtypelocation=="biome")
+              locationwildcardlist = ["-locationbiome-"]
+            else if(subtypelocation=="city")
+              locationwildcardlist = ["-locationcity-"]
+          }
+
+          
+          const chosenlocationwildcard = randomChoice(locationwildcardlist)
+          completeprompt += chosenlocationwildcard + " "
+
+          if(hybridorswap == "hybrid")
+              completeprompt += "|" + chosenlocationwildcard  + "] "
+          if(hybridorswap == "swap")
+              completeprompt += ":" + chosenlocationwildcard + ":" + randint(1,5) +  "] "
+        } else
+          completeprompt += " " + givensubject + " " 
+        
+        hybridorswap = ""
+
+        // completion of strenght end
+        completeprompt += "-objectstrengthend-"
+
+        // shots from inside can create cool effects in landscapes
+        if(chance_roll(Math.max(1,insanitylevel-2), subjectlandscapeaddonlocationchance) && insideshot == 0) {
+          insideshot = 1
+          // lets cheat a bit here, we can do something cool I saw on reddit
+          // @ts-ignore
+          if(mainchooser == "humanoid" && legendary_dist(insanitylevel))
+            completeprompt += " looking at a -addontolocationinside- "
+          // @ts-ignore
+          else if(mainchooser == "humanoid" && legendary_dist(insanitylevel))
+            completeprompt += " facing a -addontolocationinside- "
+          else if(legendary_dist(insanitylevel))
+            completeprompt += " in the distance there is a -addontolocationinside- "
+          else
+            completeprompt += " from inside of a -addontolocationinside- "
+        }
+
+        if(chance_roll(insanitylevel, subjectlandscapeaddonlocationchance) && insideshot == 0) {
+          completeprompt += " and "
+          if(chance_roll(insanitylevel, subjectlandscapeaddonlocationdescriptorchance))
+            completeprompt += "-locationdescriptor- " 
+          if(chance_roll(insanitylevel, subjectlandscapeaddonlocationculturechance))
+            completeprompt += "-culture- "
+
+          //addontolocation = [locationlist,buildinglist, vehiclelist]
+          if(randint(0,1) == 1)
+            completeprompt += "-addontolocation- "
+          else
+            completeprompt += "-background- "
+        }
+      }
+
+
+      if(mainchooser == "concept") {
+        // first add a wildcard that can be used to create prompt strenght
+        completeprompt += " -objectstrengthstart- "
+        if(subjectchooser == "conceptmixer") {
+          let chosenconceptmixerprelist = randomChoice(conceptmixerlist)
+          let chosenconceptmixerlist = chosenconceptmixerprelist.split("@")
+          let chosenconceptmixer = [chosenconceptmixerlist[0]].join('')
+          let chosenconceptmixersubject = [chosenconceptmixerlist[1]].join('')
+
+          // if there is a subject override, then replace the subject with that
+          if(givensubject=="")
+            chosenconceptmixer = chosenconceptmixer.replaceAll("-subject-",chosenconceptmixersubject )
+          else if(givensubject != "" && !subjectingivensubject)
+            chosenconceptmixer = chosenconceptmixer.replaceAll("-subject-",givensubject )
+          
+          if(overrideoutfit != "" && (chosenconceptmixer.includes("-outfit-") || chosenconceptmixer.includes("-minioutfit-"))) {
+            chosenconceptmixer = chosenconceptmixer.replaceAll("-outfit-",overrideoutfit )
+            chosenconceptmixer = chosenconceptmixer.replaceAll("-minioutfit-",overrideoutfit )
+            outfitmode = 1 // We dont want another outfit in this case
+          }
+          
+          completeprompt += chosenconceptmixer
+        } else if(givensubject == "" || (subjectingivensubject && givensubject != "")) {
+          if(subjectchooser == "event")
+            completeprompt += "  \"-event-\"  "
+        
+          if(subjectchooser == "concept")
+            completeprompt += "  \"The -conceptprefix- of -conceptsuffix-\"  "
+
+          if(subjectchooser == "poemline")
+            completeprompt += "  \"-poemline-\"  "
+
+          if(subjectchooser == "songline")
+            completeprompt += "  \"-songline-\"  "
+
+          if(subjectchooser == "cardname") 
+            completeprompt += "  \"-cardname-\" "
+
+          if(subjectchooser == "episodetitle")
+            completeprompt += "  \"-episodetitle-\"  "
+        }
+
+        // making subject override work with X and Y concepts, much fun!
+        else if(givensubject != "" && subjectchooser == "concept" && !subjectingivensubject) {
+          if(randint(0,3) == 0)
+            completeprompt += " \"The -conceptprefix- of " + givensubject + "\" "
+          else
+            completeprompt += " \"The " + givensubject + " of -conceptsuffix-\" "
+        } else
+          completeprompt += " " + givensubject + " " 
+
+        // completion of strenght end
+        completeprompt += " -objectstrengthend-"
+      } // build_dynamic_prompt.py LINE 2573
+
+      if(subjectingivensubject)
+        completeprompt += " " + givensubjectpromptlist[1] + " "
+      
+      if(genjoboractivity && genjoboractivitylocation == "middle") {
+        const joboractivitylist = [joblist,humanactivitylist]
+        completeprompt += randomChoice(randomChoice(joboractivitylist)) + ", "
+      }
+      
+      if(descriptorsintheback == 2) {
+        // Common to have 1 description, uncommon to have 2
+        if(chance_roll(insanitylevel, subjectdescriptor1chance) && generatedescriptors) {
+          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"]) {
+            if(less_verbose) {
+              if(anime_mode && randint(0,2) < 2)
+                completeprompt += ", -basicbitchdescriptor- "
+              else
+                completeprompt += ", -humandescriptor- "
+            }
+            else if(randint(0,3) > 0)
+              completeprompt += ", OR(;-heshe- is;normal) OR(;very;rare) -humandescriptor- "
+            else if(subjectchooser == "manwomanmultiple")
+              completeprompt += ", the -samehumansubject- are OR(;very;rare) -humandescriptor-"
+            else
+              completeprompt += ", OR(the -manwoman-;-samehumansubject-) is OR(;very;rare) -humandescriptor-"
+          }
+          else if(mainchooser == "landscape") {
+            if(less_verbose)
+              completeprompt += ", -locationdescriptor- "
+            else
+              completeprompt += ", OR(;-heshe- is;normal) OR(;very;rare) -locationdescriptor- "
+          }
+          else if(mainchooser == "animal") {
+            if(less_verbose)
+              completeprompt += ", -animaldescriptor- "
+            else
+              completeprompt += ", OR(;-heshe- is;normal) OR(;very;rare) -animaldescriptor- "
+          }
+          else {
+            if(less_verbose)
+              completeprompt += ", -descriptor- "
+            else
+              completeprompt += ", OR(;-heshe- is;normal) OR(;very;rare) -descriptor- "
+          }
+
+          if(chance_roll(insanitylevel, subjectdescriptor2chance) && generatedescriptors) {
+            if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) {
+              if(less_verbose)
+                completeprompt += ", -humandescriptor- "
+              else
+                completeprompt += " and -humandescriptor- "
+            }
+            else if(mainchooser == "landscape") {
+              if(less_verbose)
+                completeprompt += ", -locationdescriptor- "
+              else
+                completeprompt += " and -locationdescriptor- "
+            }
+            else if(mainchooser == "animal") {
+              if(less_verbose)
+                completeprompt += ", -animaldescriptor- "
+              else
+                completeprompt += " and -animaldescriptor- "
+            }
+            else {
+              if(less_verbose)
+                completeprompt += ", -descriptor- "
+              else
+                completeprompt += " and -descriptor- "
+            }
+          }
+        }  
+            
+        completeprompt += ", "
+      } // build_dynamic_prompt.py LINE 2634
+
+    } // build_dynamic_prompt.py LINE 2634
+
+
+    //// set the insanitylevel back
+    if(superprompter)
+      insanitylevel = originalinsanitylevel
+
+    if(!thetokinatormode) {
+      // object additions
+      for (let i = 0; i < objectadditionsrepeats; i++) {
+        if(mainchooser == "object" && chance_roll(insanitylevel, objectadditionschance) && generateobjectaddition)
+          completeprompt += ", -objectaddition- , "
+      }
+  
+  
+      // riding an animal, holding an object or driving a vehicle, rare
+      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, humanadditionchance) && generatehumanaddition) {
+        humanspecial = 1
+        completeprompt += "-humanaddition- "
+      }
+          
+      completeprompt += ", "
+
+      // unique additions for all types:
+      if(chance_roll(insanitylevel, overalladditionchance) && generateoveralladdition)
+        completeprompt += "-overalladdition- "
+
+
+      // SD understands emoji's. Can be used to manipulate facial expressions.
+      // emoji, legendary
+      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, emojichance) && generateemoji)
+          completeprompt += "-emoji-, "
+
+      // human expressions
+      if((animalashuman || subjectchooser in ["animal as human,","human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, humanexpressionchance) && generatehumanexpression)
+        completeprompt += "-humanexpression-, "
+          
+
+      // cosplaying
+      //if(subjectchooser in ["animal as human", "non fictional", "humanoid"] and rare_dist(insanitylevel) and humanspecial != 1)
+      //    completeprompt += "cosplaying as " + randomChoice(fictionallist) + ", "
+
+      // Job 
+      // either go job or activity, not both
+
+      if(genjoboractivity && genjoboractivitylocation == "back") {
+        if(randint(0,1)==0)
+          completeprompt +=  ", " + randomChoice(humanactivitylist)+ ", "
+        else
+          completeprompt +=  ", OR(,; as a;rare) -job-, "
+      }
+
+      // add face builder sometimes on generic humans
+      if(subjectchooser in ["human", "humanoid", "manwomanrelation","firstname"] && chance_roll(insanitylevel, buildfacechance) && generateface)
+        completeprompt += randomChoice(buildfacelist) + ", "
+
+      // custom mid list
+      for (let i = 0; i < custominputmidrepeats; i++) {
+        if(chance_roll(insanitylevel, custominputmidchance) && generatecustominputmid)
+          completeprompt += randomChoice(custominputmidlist) + ", "
+      }
+      
+      // add in some more mini vomits
+      if(chance_roll(insanitylevel, minivomitmidchance) && generateminivomit)
+        completeprompt += " -minivomit-, "
+      
+      // outfit builder
+      
+      if(outfitmode == 2) {
+        completeprompt += " " + randomChoice(buildoutfitlist) + ", "
+        if(extraordinary_dist(insanitylevel))
+          completeprompt += " -outfitvomit-, "
+      } else if(outfitmode == 2 && overrideoutfit != "" && imagetype != "only templates mode") {
+        completeprompt += " " + randomChoice(buildoutfitlist) + ", "
+        if(extraordinary_dist(insanitylevel))
+          completeprompt += " -outfitvomit-, "
+      }
+      
+      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"])  && chance_roll(insanitylevel, posechance) && humanspecial != 1 && generatepose)
+        completeprompt += randomChoice(poselist) + ", "
+      
+      if(subjectchooser in ["human","job","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"] && chance_roll(insanitylevel, hairchance) && generatehairstyle) {
+        completeprompt += randomChoice(buildhairlist) + ", "
+        if(unique_dist(insanitylevel))
+          completeprompt += " -hairvomit-, "
+      }
+
+      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"]) && chance_roll(insanitylevel, accessorychance) && generateaccessorie && generateaccessories)
+        completeprompt += randomChoice(buildaccessorielist) + ", "
+
+      if(chance_roll(insanitylevel, humanoidinsideshotchance) && !["landscape", "concept"].includes(subjectchooser) && generateinsideshot) {
+        insideshot = 1
+        completeprompt += randomChoice(insideshotlist) + ", "
+      }
+      
+      if(!["landscape", "concept"].includes(subjectchooser) && subjectchooser && humanspecial != 1 && insideshot == 0 && chance_roll(insanitylevel, humanoidbackgroundchance) && generatebackground)
+        completeprompt += randomChoice(backgroundtypelist) + ", "
+
+      // minilocation bit
+      if(subjectchooser in ["landscape"] && chance_roll(insanitylevel, landscapeminilocationchance) && generateminilocationaddition)
+        completeprompt += " -minilocationaddition-, "
+          
+      if(chance_roll(insanitylevel, generalminilocationchance) && generateminilocationaddition)
+        completeprompt += " -minilocationaddition-, "
+
+
+      // divider between subject and everything else
+      completeprompt += " @@@ "
+      
+
+      // Add more quality while in greg mode lol
+      if(originalartistchoice == "greg mode" && generatequality)
+        completeprompt += "-quality-, "
+
+      // landscapes it is nice to always have a time period
+      if(chance_roll(insanitylevel, timperiodchance) || subjectchooser=="landscape") {
+        if(generatetimeperiod)
+          completeprompt += "-timeperiod-, "
+      }
+
+      if(!["landscape"].includes(mainchooser) && chance_roll(insanitylevel, focuschance) && generatefocus)
+        completeprompt += "-focus-, "
+    } // build_dynalic_prompt.py LINE 2756
+
+    // artists in the middle, can happen as well:
+
+    if(artists != "none" && artistsplacement == "middle" && generateartist) {
+      completeprompt += ", "
+      doartistnormal = true
+      if(artists == "greg mode") {
+        artistbylist = ["art by", "designed by", "stylized by", "by"]
+        completeprompt += randomChoice(artistbylist) + " -gregmode-, "
+        doartistnormal = false
+
+        // in case we have ALL, we can also do a specific artist mode per chosen subject. sometimes
+      }
+      else if(originalartistchoice == "all" && randint(0,3) == 0) {
+        if(mainchooser in ["humanoid", "animal"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-portraitartist-;-characterartist-), OR(-portraitartist-;-characterartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+
+        else if(mainchooser in ["landscape"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-digitalartist-), OR(-landscapeartist-;-graphicdesignartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+
+        else if(subjectchooser in ["building"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-architectartist-), OR(-landscapeartist-;-architectartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+      }
+      
+      if(doartistnormal) {
+        // sometimes do this as well, but now in the front of the artists
+        if(giventypeofimage=="" && imagetype == "all" && randint(0, 2) == 0)
+          completeprompt += "-artiststyle- art, "
+
+        // take 1-3 artists, weighted to 1-2
+        let step = randint(0, 1)
+        let minstep = step
+        let end = randint(1, insanitylevel3)
+
+
+
+
+        // determine artist mode:
+        // normal
+        // hybrid |
+        // switching A:B:X
+        // adding at step x  a:X
+        // stopping at step x ::X
+
+        
+        const modeselector = randint(0,10)
+        if (modeselector < 4 && end - step >= 2) {
+          const artistmodeslist = ["hybrid", "stopping", "adding", "switching"]
+          artistmode = artistmodeslist[modeselector]
+          if(!advancedprompting)
+            artistmode = "normal"
+          if (artistmode in ["hybrid","switching"] && end - step == 1)
+            artistmode = "normal"
+        }
+        // if there are not enough artists in the list, then just go normal
+        if(artistlist.length < 3)
+          artistmode = "normal"
+        
+        if (artistmode in ["hybrid", "stopping", "adding","switching"])
+          completeprompt += " ["
+            
+        while (step < end) {
+          if(normal_dist(insanitylevel) && !remove_weights)
+            isweighted = 1
+          
+          if (isweighted == 1)
+            completeprompt += " ("
+
+          //completeprompt = add_from_csv(completeprompt, "artists", 0, "art by ","")
+          if(step == minstep) {
+            // sometimes do this
+            if(giventypeofimage=="" && imagetype == "all" && randint(0, 1) == 0) {
+              if(artiststyleselectormode == "normal")
+                completeprompt += artiststyleselector + " art "
+              else
+                completeprompt += "-artiststyle- art "
+            }
+            artistbylist = ["art by", "designed by", "stylized by", "by"]
+          }
+          else
+            artistbylist = [""]
+          completeprompt += randomChoice(artistbylist) + " -artist-"
+          
+          if (isweighted == 1)
+            completeprompt += ":" + (1 + (randint(-3,3)/10)).toString() + ")"       
+          
+          if (artistmode in ["hybrid"] && end - step != 1)
+            completeprompt += "|"
+          if (artistmode in ["switching"] && end - step != 1)
+            completeprompt += ":"
+      
+          if (!["hybrid", "switching"].includes(artistmode) && end - step != 1)
+            completeprompt += ","
+          
+          isweighted = 0
+          
+          step = step + 1
+        }
+
+        if (artistmode in ["stopping"]) {
+          completeprompt += "::"
+          completeprompt += randint(1,19)
+        }
+        
+        if (artistmode in ["switching","adding"])
+          completeprompt += ":" + randint(1,18)
+        if (artistmode in ["hybrid", "stopping","adding", "switching"])
+          completeprompt += "] "
+        
+        completeprompt += ", "
+        // end of the artist stuff
+      } // build_dynamic_prompt.py LINE 2786
+    } // build_dynamic_prompt.py LINE 2868
+
+    if(!thetokinatormode) {
+      // todo
+      let descriptivemode = false
+      // if we have artists, maybe go in artists descriptor mode
+      if(!anime_mode && !less_verbose && !templatemode && !specialmode && completeprompt.includes("-artist-") && uncommon_dist(Math.max(8 - insanitylevel,3))) {
+        for (let i = 0; i < randint(1,3); i++) {
+          // print("adding artist stuff")
+          completeprompt += ", -artistdescription-"
+          descriptivemode = true
+        }
+        completeprompt += ", "
+      }
+
+      // if not, we could go in random styles descriptor mode
+      else if(!anime_mode && !less_verbose && !templatemode && !specialmode && legendary_dist(10 - insanitylevel)) {
+        for (let i = 0; i < randint(1, Math.max(7,insanitylevel + 2)); i++) {
+          // print("adding random crap")
+          completeprompt += ", -allstylessuffix-"
+          descriptivemode = true
+        }
+        completeprompt += ", "
+      }
+
+      // and on high levels, DO EVERYTHING :D
+      if(!descriptivemode || rare_dist(insanitylevel)) {
+        // Add more quality while in greg mode lol
+        if(originalartistchoice == "greg mode" && generatequality)
+          completeprompt += "-quality-, "
+
+        // others
+        if(chance_roll(Math.max(1,insanitylevel -1), directionchance) && generatedirection)
+          completeprompt += "-direction-, "
+
+        if(chance_roll(insanitylevel, moodchance) && generatemood)
+          completeprompt += "-mood-, " 
+
+        // add in some more mini vomits
+        if(chance_roll(insanitylevel, minivomitsuffixchance) && generateminivomit)
+          completeprompt += " -minivomit-, "
+
+        if(chance_roll(insanitylevel, artmovementchance) && generateartmovement)
+          completeprompt += "-artmovement-, "  
+        
+        if(chance_roll(insanitylevel, lightingchance) && generatelighting)
+          completeprompt += "-lighting-, "  
+
+        // determine wether we have a photo or not
+        if(completeprompt.toLowerCase().includes("photo"))
+          isphoto = 1
+            
+        if(chance_roll(insanitylevel, photoadditionchance) && isphoto == 1 && generatephotoaddition)
+          completeprompt += randomChoice(photoadditionlist) + ", "
+                
+        if(isphoto == 1 && generatecamera)
+          completeprompt += "-camera-, "  
+
+        if(chance_roll(insanitylevel, lenschance) || isphoto == 1) {
+          if(generatelens)
+            completeprompt += "-lens-, "
+        }
+
+        if(chance_roll(insanitylevel, colorschemechance) && generatecolorscheme)
+          completeprompt += "-colorscheme-, "
+
+        // vomit some cool/wierd things into the prompt
+        if(chance_roll(insanitylevel, vomit1chance) && generatevomit) {
+          completeprompt += "-vomit-, "
+          if(chance_roll(insanitylevel, vomit2chance))
+            completeprompt += "-vomit-, "
+        }
+
+        // human specfic vomit
+        if(mainchooser == "humanoid" && chance_roll(insanitylevel, humanvomitchance) && generatehumanvomit) {
+          completeprompt += "-humanvomit-, "
+          if(chance_roll(insanitylevel, humanvomitchance))
+            completeprompt += "-humanvomit-, "
+        }
+
+        //adding a great work of art, like starry night has cool effects. But this should happen only very rarely.
+        if(chance_roll(insanitylevel, greatworkchance) && generategreatwork)
+          completeprompt += " in the style of -greatwork-, "
+
+        //adding a poemline. But this should happen only very rarely.
+        if(chance_roll(insanitylevel, poemlinechance) && generatepoemline)
+          completeprompt += " \"-poemline-\", "
+
+        //adding a songline. But this should happen only very rarely.
+        if(chance_roll(insanitylevel, songlinechance) && generatesongline)
+          completeprompt += " \"-songline-\", "
+
+        // everyone loves the adding quality. The better models don't need this, but lets add it anyway
+        if((chance_roll(insanitylevel, quality1chance) || originalartistchoice == "greg mode") && generatequality) {
+          completeprompt += "-quality-, "
+          if((chance_roll(insanitylevel, quality2chance) || originalartistchoice == "greg mode"))
+            completeprompt += "-quality-, "
+        }
+      } // build_dynamic_prompt.py LINE 2960
+    } // build_dynamic_prompt.py LINE 2960
+
+    // start second part of art blaster here
+    if(artblastermode) {
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(uncommon_dist(insanitylevel) && Boolean(artistlist?.length))
+          completeprompt += "-artist-, "
+        if(uncommon_dist(insanitylevel) && Boolean(artmovementlist?.length))
+          completeprompt += "-artmovement-, "
+        if(unique_dist(insanitylevel) && Boolean(vomitlist?.length))
+          completeprompt += "-vomit-, "
+        if(unique_dist(insanitylevel) && Boolean(imagetypelist?.length))
+          completeprompt += "-imagetype-, "
+        if(unique_dist(insanitylevel) && Boolean(colorschemelist?.length))
+          completeprompt += "-colorscheme-, "
+        step = step + 1
+      }
+    } 
+    
+    // start second part of unique art here
+    if(uniqueartmode) {
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(uncommon_dist(insanitylevel) && Boolean(artmovementlist?.length))
+          completeprompt += "-artmovement-, "
+        if(uncommon_dist(insanitylevel) && Boolean(colorschemelist?.length))
+          completeprompt += "-colorscheme-, "
+        if(rare_dist(insanitylevel) && Boolean(vomitlist?.length))
+          completeprompt += "-vomit-, "
+        if(rare_dist(insanitylevel) && Boolean(lightinglist?.length))
+          completeprompt += "-lighting-, "
+        if(unique_dist(insanitylevel) && Boolean(qualitylist?.length))
+          completeprompt += "-quality-, "
+        if(unique_dist(insanitylevel) && Boolean(artistlist?.length))
+          completeprompt += "-artist-, "
+        if(novel_dist(insanitylevel) && Boolean(greatworklist?.length))
+          completeprompt += "in style of -greatwork-, "
+        if(novel_dist(insanitylevel) && Boolean(poemlinelist?.length))
+          completeprompt += "\"-poemline-\", "
+        if(novel_dist(insanitylevel) && Boolean(songlinelist?.length))
+          completeprompt += "\"-songline-\", "
+        
+        step = step + 1 
+      }
+    } // build_dynamic_prompt.py LINE 3005
+        
+    // start second part of quality vomit here
+    if(qualityvomitmode) {
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(uncommon_dist(insanitylevel) && Boolean(vomitlist?.length))
+          completeprompt += "-vomit-, "
+        if(uncommon_dist(insanitylevel) && Boolean(qualitylist?.length))
+            completeprompt += "-quality-, "
+        if(unique_dist(insanitylevel) && Boolean(minivomitlist?.length))
+            completeprompt += "-minivomit-, "
+        if(unique_dist(insanitylevel) && Boolean(artmovementlist?.length))
+            completeprompt += "-artmovement-, "
+        if(unique_dist(insanitylevel) && Boolean(colorschemelist?.length))
+            completeprompt += "-colorscheme-, "
+        step = step + 1
+      }
+    } 
+
+    // start second part of mood color here
+    if(colorcannonmode) {
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(uncommon_dist(insanitylevel) && Boolean(moodlist?.length))
+          completeprompt += "-mood-, "
+        if(uncommon_dist(insanitylevel) && Boolean(colorschemelist?.length))
+            completeprompt += "-colorscheme-, "
+        if(rare_dist(insanitylevel) && Boolean(vomitlist?.length))
+            completeprompt += "-vomit-, "
+        if(unique_dist(insanitylevel) && Boolean(artmovementlist?.length))
+            completeprompt += "-artmovement-, "
+        if(unique_dist(insanitylevel) && Boolean(lightinglist?.length))
+            completeprompt += "-lighting-, "
+        step = step + 1
+      } 
+    }
+
+
+    // start second part of photo fantasy here
+    if(photofantasymode) {
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(uncommon_dist(insanitylevel) && Boolean(lightinglist?.length))
+          completeprompt += "-lighting-, "
+        if(uncommon_dist(insanitylevel) && Boolean(cameralist?.length))
+            completeprompt += "-camera-, "
+        if(rare_dist(insanitylevel) && Boolean(lenslist?.length))
+            completeprompt += "-lens-, "
+        if(unique_dist(insanitylevel) && Boolean(moodlist?.length))
+            completeprompt += "-mood-, "
+        if(unique_dist(insanitylevel) && Boolean(colorschemelist?.length))
+            completeprompt += "-colorscheme-, "
+        step = step + 1
+      }
+    } 
+
+    // start second part of massive madness here
+    if(massivemadnessmode) {
+      completeprompt += ", "
+      let step = 0
+      let end = randint(1, insanitylevel) + 1
+      while (step < end) {
+        if(rare_dist(insanitylevel) && Boolean(artistlist?.length))
+          completeprompt += "-artist-, "
+        if(rare_dist(insanitylevel) && Boolean(descriptorlist?.length))
+            completeprompt += "-descriptor-, "
+        if(rare_dist(insanitylevel) && Boolean(moodlist?.length))
+            completeprompt += "-mood-, "
+        if(rare_dist(insanitylevel) && Boolean(colorschemelist?.length))
+            completeprompt += "-colorscheme-, "
+        if(rare_dist(insanitylevel) && Boolean(vomitlist?.length))
+            completeprompt += "-vomit-, "
+        if(rare_dist(insanitylevel) && Boolean(artmovementlist?.length))
+            completeprompt += "-artmovement-, "
+        if(rare_dist(insanitylevel) && Boolean(lightinglist?.length))
+            completeprompt += "-lighting-, "
+        if(rare_dist(insanitylevel) && Boolean(minilocationadditionslist?.length))
+            completeprompt += "-minilocationaddition-, "
+        if(rare_dist(insanitylevel) && Boolean(materiallist?.length))
+            completeprompt += "-material-, "
+        if(rare_dist(insanitylevel) && Boolean(conceptsuffixlist?.length))
+            completeprompt += "-conceptsuffix-, "
+        if(rare_dist(insanitylevel) && Boolean(qualitylist?.length))
+            completeprompt += "-quality-, "
+        if(rare_dist(insanitylevel) && Boolean(cameralist?.length))
+            completeprompt += "-camera-, "
+        step = step + 1 
+      }
+    }
+
+    // start styles mode here
+    if(stylesmode)
+      completeprompt += chosenstylesuffix
+
+    let templatesmodechance = 0
+    if(uncommon_dist(insanitylevel) && !anime_mode) // not for anime models!
+      templatesmodechance = 1
+
+    if(dynamictemplatesmode && templatesmodechance == 1) {
+      for (let i = 0;i < randint(1,Math.max(2,insanitylevel));i++)
+        completeprompt += ", -allstylessuffix-"
+    } // build_dynamic_prompt.py LINE 3102
+
+    if(dynamictemplatesmode && common_dist(insanitylevel) && templatesmodechance == 0) {
+      if(completeprompt.includes("-artist-") || artists == "none") {
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artist-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artist-" not in sentence.lower()]
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artiststyle-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artiststyle-" not in sentence.lower()]
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artistdescription-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artistdescription-" not in sentence.lower()]
+      }
+      if(completeprompt.includes("-lighting-")) {
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-lighting-")) // [sentence for sentence in dynamictemplatessuffixlist if "-lighting-" not in sentence.lower()]
+      }
+      if(completeprompt.includes("-shotsize-"))
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-shotsize-")) // [sentence for sentence in dynamictemplatessuffixlist if "-shotsize-" not in sentence.lower()]
+      if(completeprompt.includes("-artmovement-"))
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artmovement-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artmovement-" not in sentence.lower()]
+      if(completeprompt.includes("-imagetype-") || completeprompt.includes("-othertype-")) {
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-imagetype-")) // [sentence for sentence in dynamictemplatessuffixlist if "-imagetype-" not in sentence.lower()]
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-othertype-")) // [sentence for sentence in dynamictemplatessuffixlist if "-othertype-" not in sentence.lower()]
+      }
+      if(completeprompt.includes("-colorcombination-") || completeprompt.includes("-colorscheme")) {
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-colorcombination-")) // [sentence for sentence in dynamictemplatessuffixlist if "-colorcombination-" not in sentence.lower()]
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-colorscheme-")) // [sentence for sentence in dynamictemplatessuffixlist if "-colorscheme-" not in sentence.lower()]
+      }
+      if(completeprompt.includes("-mood-") || completeprompt.includes("-humanexpression")) {
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-mood-")) // [sentence for sentence in dynamictemplatessuffixlist if "-mood-" not in sentence.lower()]
+        dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-humanexpression-")) // [sentence for sentence in dynamictemplatessuffixlist if "-humanexpression-" not in sentence.lower()]
+      }
+      chosenstylesuffix = randomChoice(dynamictemplatessuffixlist)
+      completeprompt += ". " + chosenstylesuffix
+    
+      if(normal_dist(insanitylevel)) {
+        if(completeprompt.includes("-artist-"))
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artist-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artist-" not in sentence.lower()]
+        if(completeprompt.includes("-lighting-"))
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-lighting-")) // [sentence for sentence in dynamictemplatessuffixlist if "-lighting-" not in sentence.lower()]
+        if(completeprompt.includes("-shotsize-"))
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-shotsize-")) // [sentence for sentence in dynamictemplatessuffixlist if "-shotsize-" not in sentence.lower()]
+        if(completeprompt.includes("-artmovement-"))
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artmovement-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artmovement-" not in sentence.lower()]
+        if(completeprompt.includes("-imagetype-") || completeprompt.includes("-othertype-")) {
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-imagetype-")) // [sentence for sentence in dynamictemplatessuffixlist if "-imagetype-" not in sentence.lower()]
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-othertype-")) // [sentence for sentence in dynamictemplatessuffixlist if "-othertype-" not in sentence.lower()]
+        }
+        if(completeprompt.includes("-colorcombination-") || completeprompt.includes("-colorscheme")) {
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-colorcombination-")) // [sentence for sentence in dynamictemplatessuffixlist if "-colorcombination-" not in sentence.lower()]
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-colorscheme-")) // [sentence for sentence in dynamictemplatessuffixlist if "-colorscheme-" not in sentence.lower()]
+        }
+        if(completeprompt.includes("-mood-") || completeprompt.includes("-humanexpression")) {
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-mood-")) // [sentence for sentence in dynamictemplatessuffixlist if "-mood-" not in sentence.lower()]
+          dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-humanexpression-")) // [sentence for sentence in dynamictemplatessuffixlist if "-humanexpression-" not in sentence.lower()]
+        }
+        chosenstylesuffix = randomChoice(dynamictemplatessuffixlist)
+        completeprompt += " " + chosenstylesuffix
+      }
+    } // build_dynamic_prompt.py LINE 3148
+
+    // custom style list
+    if(chance_roll(insanitylevel, customstyle1chance) && generatestyle) {
+      completeprompt += "-styletilora-, "
+      if(chance_roll(insanitylevel, customstyle2chance))
+        completeprompt += "-styletilora-, "
+    }
+
+    // custom suffix list
+    for (let i = 0;i < custominputsuffixrepeats;i++) {
+      if(chance_roll(insanitylevel, custominputsuffixchance) && generatecustominputsuffix)
+        completeprompt += randomChoice(custominputsuffixlist) + ", "
+    }
+
+    if (["enhancing"].includes(artistmode))
+      completeprompt += "::" + randint(1,17) + "] "
+
+    if(artists != "none" && artistsplacement == "back" && generateartist) {
+      completeprompt += ", "
+      doartistnormal = true
+      if(artists == "greg mode") {
+        artistbylist = ["art by", "designed by", "stylized by", "by"]
+        completeprompt += randomChoice(artistbylist) + " -gregmode- ,"
+        doartistnormal = false
+      }
+      // in case we have ALL, we can also do a specific artist mode per chosen subject. sometimes
+      else if(originalartistchoice == "all" && randint(0,3) == 0) {
+        if(mainchooser in ["humanoid", "animal"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-portraitartist-;-characterartist-), OR(-portraitartist-;-characterartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+        else if(mainchooser in ["landscape"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-digitalartist-), OR(-landscapeartist-;-graphicdesignartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+    
+        else if(subjectchooser in ["building"]) {
+          artistbylist = ["art by", "designed by", "stylized by", "by"]
+          completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-architectartist-), OR(-landscapeartist-;-architectartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
+          doartistnormal = false
+        }
+      }
+    
+      if(doartistnormal) {
+        // take 1-3 artists, weighted to 1-2
+        let step = randint(0, 1)
+        let minstep = step
+        let end = randint(1, insanitylevel3)
+    
+        // determine artist mode:
+        // normal
+        // hybrid |
+        // switching A:B:X
+        // adding at step x  a:X
+        // stopping at step x ::X
+        
+        const modeselector = randint(0,10)
+        if (modeselector < 4 && end - step >= 2) {
+          const artistmodeslist = ["hybrid", "stopping", "adding", "switching"]
+          artistmode = artistmodeslist[modeselector]
+          if(advancedprompting == false)
+            artistmode = "normal"
+          if (artistmode in ["hybrid","switching"] && end - step == 1)
+            artistmode = "normal"
+        }
+        // if there are not enough artists in the list, then just go normal
+        if(artistlist.length < 3)
+          artistmode = "normal"
+        
+        if (artistmode in ["hybrid", "stopping", "adding","switching"])
+          completeprompt += " ["
+            
+        while (step < end) {
+          if(normal_dist(insanitylevel) && !remove_weights)
+            isweighted = 1
+        
+          if (isweighted == 1)
+            completeprompt += " ("
+    
+          //completeprompt = add_from_csv(completeprompt, "artists", 0, "art by ","")
+          if(step == minstep) {
+            // sometimes do this
+            if(giventypeofimage == "" && imagetype == "all" && randint(0, 1) == 0) {
+              if(artiststyleselectormode == "normal")
+                completeprompt += artiststyleselector + " art "
+              else
+                completeprompt += "-artiststyle- art "
+            }
+            artistbylist = ["art by", "designed by", "stylized by", "by"]
+          } else
+            artistbylist = [""]
+          completeprompt += randomChoice(artistbylist) + " -artist-"
+          
+          if (isweighted == 1)
+            completeprompt += ":" + (1 + (randint(-3,3)/10)).toString() + ")"       
+          
+          if (artistmode in ["hybrid"] && !(end - step == 1))
+            completeprompt += "|"
+          if (artistmode in ["switching"] && !(end - step == 1))
+            completeprompt += ":"
+    
+          if (!["hybrid", "switching"].includes(artistmode) && !(end - step == 1))
+            completeprompt += ","
+          
+          isweighted = 0
+          
+          step = step + 1
+    
+        } // build_dynamic_prompt.py LINE 3260
+    
+        if (artistmode in ["stopping"]) {
+          completeprompt += "::"
+          completeprompt += randint(1,19)
+        }
+        
+        if (artistmode in ["switching","adding"])
+          completeprompt += ":" + randint(1,18)
+        if (artistmode in ["hybrid", "stopping","adding", "switching"])
+          completeprompt += "] "
+      }
+    } // build_dynamic_prompt.py LINE 3270
+    // end of the artist stuff
+
+    if(partlystylemode) {
+      // add a part of the style to the back
+      const chosenstylesuffixlist = chosenstylesuffix.split(",")
+      for (let i = 0;i < chosenstylesuffixlist.length;i++) {
+        if(randint(3, 10) < insanitylevel)
+          chosenstylesuffixlist.splice(randint(0, chosenstylesuffixlist.length - 1), 1)
+      }
+      const chosenstylesuffixcomplete = chosenstylesuffixlist.join(", ")
+      
+
+      completeprompt += ", " + chosenstylesuffixcomplete
+    }
+      
+    if(artifymode) {
+      const amountofartists = "random"
+      let mode = ''
+      if(unique_dist(insanitylevel))
+        mode = "super remix turbo"
+      else if(legendary_dist(insanitylevel))
+        mode = "remix"
+      else
+        mode = "standard"
+      completeprompt = await artify_prompt(insanitylevel, completeprompt, artists, amountofartists, mode, seed)
+    }
+    
+    completeprompt += " -tempnewwords- "
+    completeprompt += ", "
+
+    completeprompt = prefixprompt + ", " + completeprompt
+    completeprompt += suffixprompt
+
+    // and then up the compounding stuff
+    compoundcounter += 1
+    
+    // Here comes all the seperator stuff for prompt compounding
+    if(compoundcounter < promptstocompound) {
+      if(seperator == "comma")
+        completeprompt += " \n , "
+      else
+        completeprompt += " \n " + seperator + " "
+    } // build_dynamic_prompt.py LINE 3309
+
+  } // build_dynamic_prompt.py LINE 3309
+
+  //end of the while loop, now clean up the prompt
+
+  customizedLogger('99-1', completeprompt);
+
+  // In front and the back?
+  if(!dynamictemplatesmode)
+    completeprompt = parse_custom_functions(completeprompt, insanitylevel)
+
+  customizedLogger('99-2', completeprompt);
+  
+  // Sometimes change he/she to the actual subject
+  // Doesnt work if someone puts in a manual subject
+  if(mainchooser == "humanoid" && (givensubject == "" || (subjectingivensubject && givensubject != "")) && subjectchooser != "manwomanmultiple") {
+    let samehumanreplacementlist = ["-heshe-","-heshe-","-heshe-","-heshe-","-heshe-", "-samehumansubject-", "-samehumansubject-", "-samehumansubject-", "-samehumansubject-", "-samehumansubject-"]
+    shuffle(samehumanreplacementlist)
+
+    customizedLogger('99-3-1', completeprompt);
+    
+    // Convert completeprompt to a list to allow character-wise manipulation
+    const completeprompt_list = completeprompt.split("")
+    // Iterate over the characters in completeprompt_list
+    for (let i = 0;i < (completeprompt_list.length - "-heshe-".length + 1);i++) {
+      if (completeprompt_list.slice(i, i + "-heshe-".length).join('') == "-heshe-") {
+        // Replace -heshe- with a value from the shuffled list
+        const replacement = samehumanreplacementlist.pop()
+        completeprompt_list.splice(i, "-heshe-".length, ...(replacement?.split('') ?? []))
+      }
+    }
+    // Convert the list back to a string
+    completeprompt = completeprompt_list.join("")
   }
+
+  customizedLogger('99-2', completeprompt);
+  
+  // Sometimes change he/she to the actual subject
+  if((mainchooser in  ["animal", "object"]) && (givensubject == "" || (subjectingivensubject && givensubject != ""))) {
+    let sameobjectreplacementlist = ["-heshe-","-heshe-","-heshe-","-heshe-","-heshe-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-"]
+    shuffle(sameobjectreplacementlist)
+
+    customizedLogger('99-4-1', completeprompt);
+
+    // Convert completeprompt to a list to allow character-wise manipulation
+    let completeprompt_list = completeprompt.split("")
+
+    // Iterate over the characters in completeprompt_list
+    for (let i = 0;i < (completeprompt_list.length - "-heshe-".length + 1);i++) {
+      if (completeprompt_list.slice(i, i + "-heshe-".length).join('') == "-heshe-") {
+        // Replace -heshe- with a value from the shuffled list
+        const replacement = sameobjectreplacementlist.pop()
+        completeprompt_list.splice(i, "-heshe-".length, ...(replacement?.split('') ?? []))
+      }
+    }
+    // Convert the list back to a string
+    completeprompt = completeprompt_list.join('')
+  }
+
+  customizedLogger('99-3', completeprompt);
+
+  // hair descriptor
+  if(rare_dist(insanitylevel)) // Use base hair descriptor, until we are not.
+    completeprompt = completeprompt.replaceAll("-hairdescriptor-", "-descriptor-")
+  
+  // human descriptor
+  if(rare_dist(insanitylevel)) // Use base human descriptor, until we are not.
+    completeprompt = completeprompt.replaceAll("-humandescriptor-", "-descriptor-")
+  
+  // location descriptor
+  if(rare_dist(insanitylevel)) // Use base location descriptor, until we are not.
+    completeprompt = completeprompt.replaceAll("-locationdescriptor-", "-descriptor-")
+  
+  // animeal descriptor
+  if(rare_dist(insanitylevel)) // Use base animal descriptor, until we are not.
+    completeprompt = completeprompt.replaceAll("-animaldescriptor-", "-descriptor-")
+
+
+  // sometimes, culture becomes traditional!
+  if(unique_dist(insanitylevel))
+    completeprompt = completeprompt.replaceAll("-culture-", "traditional -culture-")
+
+
+  // first some manual stuff for outfit
+
+  if(unique_dist(insanitylevel)) // sometimes, its just nice to have descriptor and a normal "outfit". We use mini outfits for this!
+    completeprompt = completeprompt.replace("-outfit-", "-minioutfit-")
+  if(rare_dist(insanitylevel)) // Use base outfit descriptor, until we are not.
+    completeprompt = completeprompt.replaceAll("-outfitdescriptor-", "-descriptor-")
+
+  customizedLogger('100-1', completeprompt);
+  
+  // if -outfit- is in the override, we want a consistent result
+  if(overrideoutfit.includes("-outfit-")) {
+    if(chance_roll(insanitylevel, "common"))
+      overrideoutfit = overrideoutfit.replaceAll("-outfit-", randomChoice(outfitlist))
+    else
+      overrideoutfit = overrideoutfit.replaceAll("-outfit-", randomChoice(minioutfitlist))
+  }
+
+  if(overrideoutfit != "") {
+    completeprompt = completeprompt.replaceAll("-sameoutfit-", overrideoutfit)
+    completeprompt = completeprompt.replace("-outfit-", overrideoutfit)
+    completeprompt = completeprompt.replace("-minioutfit-", overrideoutfit)
+    completeprompt = completeprompt.replaceAll("-overrideoutfit-", overrideoutfit)
+  }
+
+  if(givensubject != "" && subjectingivensubject == false) {
+    completeprompt = completeprompt.replaceAll("-samehumansubject-", givensubject)
+    completeprompt = completeprompt.replaceAll("-sameothersubject-", givensubject)
+  } // build_dynamic_prompt.py 3402
+
+  customizedLogger('101-1', completeprompt);
+
+
+  // If we don't have an override outfit, then remove this part
+  completeprompt = completeprompt.replaceAll("-overrideoutfit-", "")
+
+  // sometimes replace one descriptor with a artmovement, only on high insanitylevels
+  if(insanitylevel > 7 && unique_dist(insanitylevel))
+    completeprompt = completeprompt.replace("-descriptor-", "-artmovement-")
+
+  // On low insanity levels (lower than 5) ,a chance refer to the basic bitch list on some occasions
+  if(randint(0,insanitylevel) == 0 && insanitylevel < 5) {
+    completeprompt = completeprompt.replaceAll("-locationdescriptor-", "-basicbitchdescriptor-")
+    completeprompt = completeprompt.replaceAll("-humandescriptor-", "-basicbitchdescriptor-")
+    completeprompt = completeprompt.replaceAll("-outfitdescriptor-", "-basicbitchdescriptor-")
+    completeprompt = completeprompt.replaceAll("-descriptor-", "-basicbitchdescriptor-")
+    completeprompt = completeprompt.replaceAll("-animaldescriptor-", "-basicbitchdescriptor-")
+  }
+
+  // we now have color combinations, which are stronger than just color. So lets change them while we are at it.
+  if(randint(0, Math.max(0, insanitylevel - 2)) <= 0) {
+    completeprompt = completeprompt.replaceAll("-color- and -color-", "-colorcombination-") // any color and color becomes a color combination
+
+    let colorreplacementlist = ["-color-","-color-","-color-","-colorcombination-","-colorcombination-", "-colorcombination-", "-colorcombination-", "-colorcombination-", "-colorcombination-", "-colorcombination-"]
+    shuffle(colorreplacementlist)
+    
+    // Convert completeprompt to a list to allow character-wise manipulation
+    const completeprompt_list = completeprompt.split('')
+    // Iterate over the characters in completeprompt_list            
+    for (let i = 0;i < (completeprompt_list.length - "-color-".length + 1);i++) {
+      if (completeprompt_list.slice(i, i + "-color-".length).join('') == "-color-") {
+        // Replace -color- with a value from the shuffled list
+        const replacement = colorreplacementlist.pop()
+        completeprompt_list.splice(i, "-color-".length, ...(replacement?.split('') ?? []))
+      }
+    }
+
+    // Convert the list back to a string
+    completeprompt = completeprompt_list.join('')
+  }
+
+  customizedLogger('102-1', completeprompt);
+
+  // we now have material combinations, which are stronger than just one material. So lets change them while we are at it.
+  if(randint(0, Math.max(0, insanitylevel - 4)) <= 0) {
+    completeprompt = completeprompt.replaceAll("-material- and -material-", "-materialcombination-") // any color and color becomes a color combination
+
+    let materialreplacementlist = ["-material-","-material-","-material-","-materialcombination-","-materialcombination-", "-materialcombination-", "-materialcombination-", "-materialcombination-", "-materialcombination-", "-materialcombination-"]
+    shuffle(materialreplacementlist)
+    
+    // Convert completeprompt to a list to allow character-wise manipulation
+    const completeprompt_list = completeprompt.split('')
+    // Iterate over the characters in completeprompt_list
+    for (let i = 0;i < (completeprompt_list.length - "-material-".length + 1);i++) {
+      if (completeprompt_list.slice(i, i + "-material-".length).join('') == "-material-") {
+        // Replace -material- with a value from the shuffled list
+        const replacement = materialreplacementlist.pop()
+        completeprompt_list.splice(i, "-material-".length, ...(replacement?.split('') ?? []))
+      }
+    }
+
+    // Convert the list back to a string
+    completeprompt = completeprompt_list.join('')
+  } // build_dynamic_prompt.py LINE 3458
+
+  customizedLogger('102-2', completeprompt);
+
+  while (check_completeprompt_include(completeprompt)) {
+    const allwildcardslistnohybrid = [
+      "-color-","-object-", "-animal-", "-fictional-","-nonfictional-","-building-","-vehicle-","-location-","-conceptprefix-","-food-","-haircolor-","-hairstyle-","-job-", "-accessory-", "-humanoid-", "-manwoman-", "-human-", "-colorscheme-", "-mood-", "-genderdescription-", "-artmovement-", "-malefemale-", "-bodytype-", "-minilocation-", "-minilocationaddition-", "-pose-", "-season-", "-minioutfit-", "-elaborateoutfit-", "-minivomit-", "-vomit-", "-rpgclass-", "-subjectfromfile-","-outfitfromfile-", "-brand-", "-space-", "-artist-", "-imagetype-", "-othertype-", "-quality-", "-lighting-", "-camera-", "-lens-","-imagetypequality-", "-poemline-", "-songline-", "-greatwork-", "-fantasyartist-", "-popularartist-", "-romanticismartist-", "-photographyartist-", "-emoji-", "-timeperiod-", "-shotsize-", "-musicgenre-", "-animaladdition-", "-addontolocationinside-", "-addontolocation-", "-objectaddition-", "-humanaddition-", "-overalladdition-", "-focus-", "-direction-", "-styletilora-", "-manwomanrelation-", "-waterlocation-", "-container-", "-firstname-", "-flora-", "-print-", "-miniactivity-", "-pattern-", "-animalsuffixaddition-", "-chair-", "-cardname-", "-covering-", "-heshe-", "-hisher-", "-himher-", "-outfitdescriptor-", "-hairdescriptor-", "-hairvomit-", "-humandescriptor-", "-manwomanmultiple-", "-facepart-", "-buildfacepart-", "-outfitvomit-", "-locationdescriptor-", "-basicbitchdescriptor-", "-animaldescriptor-", "-humanexpression-", "-humanvomit-", "-eyecolor-", "-fashiondesigner-", "-colorcombination-", "-materialcombination-", "-oppositefictional-", "-oppositenonfictional-", "-photoaddition-", "-age-", "-agecalculator-", "-gregmode-"
+      ,"-portraitartist-", "-characterartist-" , "-landscapeartist-", "-scifiartist-", "-graphicdesignartist-", "-digitalartist-", "-architectartist-", "-cinemaartist-", "-setting-", "-charactertype-", "-objectstohold-", "-episodetitle-", "-token-", "-allstylessuffix-", "-fluff-", "-event-", "-background-"
+      , "-occult-", "-locationfantasy-", "-locationscifi-", "-locationvideogame-", "-locationbiome-", "-locationcity-", "-bird-", "-cat-", "-dog-", "-insect-", "-pokemon-", "-pokemontype-", "-marinelife-"
+    ]
+    const allwildcardslistnohybridlists = [
+      colorlist, objectlist, animallist, fictionallist, nonfictionallist, buildinglist, vehiclelist, locationlist,conceptprefixlist,foodlist,haircolorlist, hairstylelist,joblist, accessorielist, humanoidlist, manwomanlist, humanlist, colorschemelist, moodlist, genderdescriptionlist, artmovementlist, malefemalelist, bodytypelist, minilocationlist, minilocationadditionslist, poselist, seasonlist, minioutfitlist, elaborateoutfitlist, minivomitlist, vomitlist, rpgclasslist, customsubjectslist, customoutfitslist, brandlist, spacelist, artistlist, imagetypelist, othertypelist, qualitylist, lightinglist, cameralist, lenslist, imagetypequalitylist, poemlinelist, songlinelist, greatworklist, fantasyartistlist, popularartistlist, romanticismartistlist, photographyartistlist, emojilist, timeperiodlist, shotsizelist, musicgenrelist, animaladditionlist, addontolocationinsidelist, addontolocationlist, objectadditionslist, humanadditionlist, overalladditionlist, focuslist, directionlist, stylestiloralist, manwomanrelationlist, waterlocationlist, containerlist, firstnamelist, floralist, printlist, miniactivitylist, patternlist, animalsuffixadditionlist, chairlist, cardnamelist, coveringlist, heshelist, hisherlist, himherlist, outfitdescriptorlist, hairdescriptorlist, hairvomitlist, humandescriptorlist, manwomanmultiplelist, facepartlist, buildfacepartlist, outfitvomitlist, locationdescriptorlist, basicbitchdescriptorlist, animaldescriptorlist, humanexpressionlist, humanvomitlist, eyecolorlist, fashiondesignerlist, colorcombinationlist, materialcombinationlist, oppositefictionallist, oppositenonfictionallist, photoadditionlist, agelist, agecalculatorlist, gregmodelist
+      , portraitartistlist, characterartistlist, landscapeartistlist, scifiartistlist, graphicdesignartistlist, digitalartistlist, architectartistlist, cinemaartistlist, settinglist, charactertypelist, objectstoholdlist, episodetitlelist, tokenlist, allstylessuffixlist, flufferlist, eventlist, backgroundlist
+      , occultlist, locationfantasylist, locationscifilist, locationvideogamelist, locationbiomelist, locationcitylist, birdlist, catlist, doglist, insectlist, pokemonlist, pokemontypelist, marinelifelist
+    ]
+
+    const allwildcardslistwithhybrid = ["-material-", "-descriptor-", "-outfit-", "-conceptsuffix-","-culture-", "-objecttotal-", "-outfitprinttotal-", "-element-"]
+    const allwildcardslistwithhybridlists = [materiallist, descriptorlist,outfitlist,conceptsuffixlist,culturelist, objecttotallist, outfitprinttotallist, elementlist]
+
+
+    //  keywordsinstring = any(word.lower() in givensubject.lower() for word in keywordslist)
+    for (const wildcard of allwildcardslistnohybrid) {
+      const attachedlist = allwildcardslistnohybridlists[allwildcardslistnohybrid.indexOf(wildcard)]
+      completeprompt = await replacewildcard(completeprompt, insanitylevel, wildcard, attachedlist,false, advancedprompting, artiststyleselector)
+    }
+
+    for (const wildcard of allwildcardslistwithhybrid) {
+      let attachedlist = allwildcardslistwithhybridlists[allwildcardslistwithhybrid.indexOf(wildcard)]
+      completeprompt = await replacewildcard(completeprompt, insanitylevel, wildcard, attachedlist.map(x => x.toString()),true, advancedprompting, artiststyleselector)
+    } // LINE 3625
+  } // LINE 3625
+
+  customizedLogger('102-3', completeprompt);
+
+  // completeprompt = await replace_user_wildcards(completeprompt)
+
+  customizedLogger('103-1', completeprompt);
+
+  // prompt strenght stuff
+
+  // if the given subject already is formed like this ( :1.x)
+  // then just ignore this
+
+  let matches: string[] = []
+  if(givensubject != "") {
+    matches = Array.from(givensubject.match(/\(\w+:\d+\.\d+\)/g) ?? [])
+  }
+
+  let strenght = "1.0"
+  if(completeprompt.length > 325 && !matches.length && !remove_weights) {
+    if(completeprompt.length < 375)
+      strenght = "1.1"  
+    else if(completeprompt.length < 450)
+      strenght = "1.2"  
+    else
+      strenght = "1.3"  
+    completeprompt = completeprompt.replaceAll("-objectstrengthstart-","(")
+    completeprompt = completeprompt.replaceAll("-objectstrengthend-",":" + strenght + ")")
+  } else {
+    completeprompt = completeprompt.replaceAll("-objectstrengthstart-","")
+    completeprompt = completeprompt.replaceAll("-objectstrengthend-","")
+  }
+
+
+  // Now, we are going to parse any custom functions we have build in
+  // this is OR()
+  // OR()
+
+  // OR(foo;bar;bla)  --> randomly take foo, bar or bla
+  // OR(foo;bar;bla;uncommon) --> Take foo, unless it hits uncommon roll. Then take bar or bla
+  // OR(;foo)  --> empty or foo
+  // OR(;foo;uncommon) --> empty unless it hits uncommon roll. Then take foo
+  // OR(;foo;bar;uncommon) --> empty unless it hits uncommon roll. Then take foo or bar
+
+
+  completeprompt = parse_custom_functions(completeprompt, insanitylevel)
+
+  // prompt enhancer!
+  if(!templatemode && !specialmode && base_model != "Stable Cascade") {
+    // how insane do we want it?
+
+    const maxamountofwords = Math.max(0, -1 + randint(0,4),6 - insanitylevel)
+    const amountofwords = randint(0,maxamountofwords)
+
+    if(amountofwords > 0) {
+      const enhance_positive_words = await enhance_positive(completeprompt, amountofwords)
+      completeprompt = completeprompt.replaceAll("-tempnewwords-", enhance_positive_words)
+    }
+  }
+
+  completeprompt = completeprompt.replaceAll("-tempnewwords-", "")
+
+  customizedLogger('104-1', completeprompt);
+      
+  // clean it up
+  completeprompt = cleanup(completeprompt, advancedprompting, insanitylevel)
+
+  customizedLogger('105-1', completeprompt);
+
+  let prompt_g = ""
+  let prompt_l = ""
+
+  // Split it up for support for prompt_g (subject) and prompt_l (style)
+  if(completeprompt.includes("@@@") && prompt_g_and_l) {
+    const promptlist = completeprompt.split("@@@")
+    prompt_g = cleanup(promptlist[1], advancedprompting, insanitylevel)
+    prompt_l = cleanup((promptlist[0] + ", " + promptlist[2]).replaceAll("of a",""), advancedprompting, insanitylevel)
+  }
+  if(completeprompt.includes("@@@") && superprompter) {
+    //load_models()
+    const promptlist = completeprompt.split("@@@")
+    const subjectprompt = cleanup(promptlist[1], advancedprompting, insanitylevel)
+    const startprompt = cleanup(promptlist[0], advancedprompting, insanitylevel)
+    const endprompt = cleanup(promptlist[2], advancedprompting, insanitylevel)
+    const superpromptresult = await one_button_superprompt(insanitylevel, subjectprompt, seed, givensubject, overrideoutfit, subjectchooser, gender, startprompt + endprompt)
+    completeprompt = startprompt + ", " + superpromptresult + ", " + endprompt
+    prompt_g = superpromptresult
+    prompt_l = startprompt + endprompt
+  } else if(!prompt_g_and_l) {
+    prompt_g = completeprompt
+    prompt_l = completeprompt
+  }
+
+  customizedLogger('106-1', completeprompt);
+      
+
+  completeprompt = completeprompt.replaceAll(" @@@ ", " ")
+  completeprompt = completeprompt.replaceAll("@@@ ", " ")
+  completeprompt = completeprompt.replaceAll(" @@@", " ")
+  completeprompt = completeprompt.replaceAll("@@@", " ")
+  completeprompt = cleanup(completeprompt, advancedprompting, insanitylevel)
+
+  customizedLogger('107-1', completeprompt);
+
+  //just for me, some fun with posting fake dev messages (ala old sim games)
+  if(randint(1, 50) == 1) {
+    console.log("")
+    console.log(randomChoice(devmessagelist))
+    console.log("")
+  }
+
+  console.log(completeprompt) // keep this! :D 
+
+  if(!prompt_g_and_l)
+    return completeprompt
+  else
+    return { completeprompt, prompt_g, prompt_l }
 
 }
