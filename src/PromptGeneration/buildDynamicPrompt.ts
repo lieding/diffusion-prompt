@@ -2,7 +2,7 @@ import { csv_to_list, csv_to_list_ } from "./helpers/csvUtil";
 import {
   arrayRemove,
   artist_category_by_category_csv_to_list,
-  artist_category_csv_to_list, artist_descriptions_csv_to_list, chance_roll, common_dist, extraordinary_dist, legendary_dist, load_all_artist_and_category, load_config_csv,
+  artist_category_csv_to_list, artist_descriptions_csv_to_list, artist_style_cols, chance_roll, common_dist, extraordinary_dist, legendary_dist, load_all_artist_and_category, load_config_csv,
   normal_dist, novel_dist, randint, randomChoice, rare_dist, SeededRandom, shuffle, uncommon_dist, unique_dist
 } from "./helpers/general";
 import { customizedLogger } from "./helpers/logger";
@@ -87,7 +87,7 @@ function cleanup(completeprompt: string, advancedprompting: boolean, insanitylev
 
   // all cleanup steps moved here
   completeprompt = completeprompt.replace(/\[ /g, '[')
-  completeprompt = completeprompt.replace(/\[,/g, '[',)
+  completeprompt = completeprompt.replace(/\[,/g, '[')
   completeprompt = completeprompt.replace(/ \]/g, ']')
   completeprompt = completeprompt.replace(/ \|/g, '|')
   //completeprompt = completeprompt.replaceAll(r' \"', '\"', completeprompt)
@@ -200,18 +200,19 @@ function cleanup(completeprompt: string, advancedprompting: boolean, insanitylev
   completeprompt = completeprompt.replaceAll('., ', '. ')
   completeprompt = completeprompt.replaceAll('. . ', '. ')
 
-  completeprompt = completeprompt.replaceAll(", ", '')
+  // completeprompt = completeprompt.replaceAll(", ", '')
 
   return completeprompt
 }
 
 function custom_or(values: string[], insanitylevel = 5) {
+  if (values.length == 1) return values[0]
   // Check if the last element is one of the specific values
-  const last_element = values[-1]
+  const last_element = values[values.length - 1]
   const first_element = values[0]
   let selected_value = ''
   
-  if (last_element in ['always', 'common', 'normal','uncommon', 'rare', 'legendary','unique', 'extraordinary', 'novel', 'never']) {
+  if (['always', 'common', 'normal','uncommon', 'rare', 'legendary','unique', 'extraordinary', 'novel', 'never'].includes(last_element)) {
     // If we do not hit the change roll, then take the first element.
     if (!(chance_roll(insanitylevel, last_element)))
       return first_element
@@ -232,10 +233,8 @@ function parse_custom_functions(completeprompt: string, insanitylevel = 5) {
   //print(completeprompt)
 
   // Regular expression pattern to match 'or()' function calls and their arguments
-  let ORpattern = /OR\((.*?)\)/
+  let ORpattern = /OR\((.*?)\)/g
   let ORbasesearch = 'OR('
-
-
 
   while (completeprompt.includes(ORbasesearch)) {
     // basically start from right to left to start replacing, so we can do nesting
@@ -245,19 +244,23 @@ function parse_custom_functions(completeprompt: string, insanitylevel = 5) {
     const lastpartofcompleteprompt = completeprompt.substring(startofOR)
 
     // Find all 'or()' function calls and their arguments in the text
-    const matches = Array.from(lastpartofcompleteprompt.match(/OR\((.*?)\)/ig) ?? [])
+    const matches = Array.from(lastpartofcompleteprompt.match(ORpattern) ?? [])
+
+    if (!matches.length) continue
 
     // Sort the matches based on the length of the OR expressions
     matches.sort((a, b) => a.length - b.length)
 
 
-    const match = matches[0] // get the first value, so smallest goes first!
+    const match = matches[0] ?? '' // get the first value, so smallest goes first!
 
     let or_replacement = ""
 
 
     // Split the arguments by ';'
-    const argumentss = match.split(';').map(it => it.trim())
+    const argumentss = match
+      .slice(3, -1)
+      .split(';').map(it => it.trim()).filter(it => it.length > 0)
     
     // Evaluate the 'or()' function and append the result to the results list
 
@@ -265,8 +268,7 @@ function parse_custom_functions(completeprompt: string, insanitylevel = 5) {
     //print(completeprompt)
     //print(arguments)
     or_replacement = custom_or(argumentss, insanitylevel)
-    const completematch = 'OR(' + match + ')'
-    completeprompt = completeprompt.replaceAll(completematch, or_replacement)
+    completeprompt = completeprompt.replaceAll(match, or_replacement)
   }
   return completeprompt
 }
@@ -307,7 +309,7 @@ async function artify_prompt(insanitylevel = 5, prompt = "", artists = "all", am
 
   let artistlist: string[] = []
   // create artist list to use in the code, maybe based on category  or personal lists
-  if(artists != "all (wild)" && artists != "all" && artists != "none" && artists.startsWith("personal_artists") == false && artists.startsWith("personal artists") == false && artists in artisttypes)
+  if(artists != "all (wild)" && artists != "all" && artists != "none" && artists.startsWith("personal_artists") == false && artists.startsWith("personal artists") == false && artisttypes.includes(artists))
     artistlist = await artist_category_csv_to_list("artists_and_category",artists)
   else if(artists.startsWith("personal_artists") || artists.startsWith("personal artists")) {
     artists = artists.replaceAll(" ", "_") // add underscores back in
@@ -496,11 +498,11 @@ async function replacewildcard(
 
         artiststyle = artiststyle.filter(x => x?.length) // remove empty values
 
-        if(artiststyleselector in artiststyle)
+        if(artiststyle.includes(artiststyleselector))
           arrayRemove(artiststyle, artiststyleselector)
 
         // Sorry folks, this only works when you directly select it as a style
-        if("nudity" in artiststyle)
+        if(artiststyle.includes("nudity"))
           arrayRemove(artiststyle, "nudity")
 
         // keep on looping until we have no more wildcards or no more styles to choose from
@@ -545,31 +547,31 @@ async function replacewildcard(
       } else
         replacementvalueforoverrides = replacementvalue
 
-      if(wildcard in [
+      if([
         "-human-"
         ,"-humanoid-"
         , "-manwoman-"
         , "-manwomanrelation-"
         , "-manwomanmultiple-"
-        ] && completeprompt.includes("-samehumansubject-")
+        ].includes(wildcard) && completeprompt.includes("-samehumansubject-")
       ) {
         if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
           completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
       }
       
-      if(wildcard in [
+      if([
         "-fictional-"
         , "-nonfictional-"
         , "-firstname-"
         , "-oppositefictional-"
         , "-oppositenonfictional-"
-      ] && completeprompt.includes("-samehumansubject-" )) {
+      ].includes(wildcard) && completeprompt.includes("-samehumansubject-" )) {
         if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
           completeprompt = completeprompt.replaceAll("-samehumansubject-", replacementvalueforoverrides)
       }
       
       // job is here, to prevent issue with a job outfit being replace. So doing it later solves that issue
-      if(wildcard in ["-job-"] && completeprompt.includes("-samehumansubject-")) {
+      if(["-job-"].includes(wildcard) && completeprompt.includes("-samehumansubject-")) {
         if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-samehumansubject-"))
           completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
       }
@@ -583,7 +585,7 @@ async function replacewildcard(
           completeprompt = completeprompt.replaceAll("-samehumansubject-", "the " + replacementvalueforoverrides)
       }
 
-      if(wildcard in [
+      if([
         "-animal-"                         
         , "-object-"
         , "-vehicle-"
@@ -592,7 +594,7 @@ async function replacewildcard(
         , "-space-"
         , "-flora-"
         , "-location-"
-        , "-building-"]
+        , "-building-"].includes(wildcard)
         &&  completeprompt.includes("-sameothersubject-")
       ) {
         if(completeprompt.indexOf(wildcard) < completeprompt.indexOf("-sameothersubject-"))
@@ -1122,7 +1124,7 @@ async function one_button_superprompt(insanitylevel = 5, prompt = "", seed = -1,
 // forcesubject van be used to force a certain type of subject
 // Set artistmode to none, to exclude artists
 
-export async function build_dynamic_prompt(
+async function build_dynamic_prompt(
   insanitylevel = 5,
   forcesubject = "all",
   artists = "all",
@@ -1286,7 +1288,7 @@ export async function build_dynamic_prompt(
     basemodel = "Anime Model"
   // Base model options, used to change things in prompt generation. Might be able to extend to different forms like animatediff as well?
   let base_model_options = ["SD1.5", "SDXL", "Stable Cascade", "Anime Model"];
-  if (!(base_model in base_model_options))
+  if (!(base_model_options.includes(base_model)))
     base_model = "SD1.5" // Just in case there is no option here.
   // "SD1.5" -- Standard, future: More original style prompting
   // "SDXL" -- Standard (for now), future: More natural language
@@ -1337,64 +1339,22 @@ export async function build_dynamic_prompt(
   if (gender == "male")
     oppositegender = "female"; // build_dynamic_prompt.py LINE207
 
-  // build all lists here
-
-  const colorlist = await csv_to_list("colors",antilist)
-  const animallist = await csv_to_list("animals",antilist)    
-  const materiallist = await csv_to_list("materials",antilist)
-  const objectlist = await csv_to_list("objects",antilist)
-  const fictionallist = await csv_to_list_({csvfilename:"fictional characters",antilist,skipheader:true,gender})
-  const nonfictionallist = await csv_to_list_({csvfilename:"nonfictional characters",antilist,skipheader:true,gender})
-  const oppositefictionallist = await csv_to_list_({csvfilename:"fictional characters",antilist,skipheader:true,gender:oppositegender})
-  const oppositenonfictionallist = await csv_to_list_({csvfilename:"nonfictional characters",antilist,skipheader:true,gender:oppositegender})
-  const conceptsuffixlist = await csv_to_list("concept_suffix",antilist)
-  const buildinglist = await csv_to_list("buildings",antilist)
-  const vehiclelist = await csv_to_list("vehicles",antilist)
-  const outfitlist = await csv_to_list("outfits",antilist)
-  const locationlist = await csv_to_list("locations",antilist)
-  const backgroundlist = await csv_to_list("backgrounds",antilist)
-
-  const accessorielist = await csv_to_list("accessories",antilist,"/csvfiles/",0,"?",false,false,gender)
-  const artmovementlist = await csv_to_list("artmovements",antilist)
-  const bodytypelist = await csv_to_list_({csvfilename:"body_types",antilist,skipheader:true,gender})
-  const cameralist = await csv_to_list("cameras",antilist)
-  const colorschemelist = await csv_to_list("colorscheme",antilist)
-  const conceptprefixlist = await csv_to_list("concept_prefix",antilist)
-  const culturelist = await csv_to_list("cultures",antilist)
-  let descriptorlist = await csv_to_list("descriptors",antilist)
-  const devmessagelist = await csv_to_list("devmessages",antilist)
-  const directionlist = await csv_to_list_({csvfilename:"directions",antilist,insanitylevel})
-  const emojilist = await csv_to_list("emojis",antilist)
-  const eventlist = await csv_to_list("events",antilist)
-  const focuslist = await csv_to_list_({csvfilename:"focus",antilist, insanitylevel})
-  const greatworklist = await csv_to_list("greatworks",antilist)
-  const haircolorlist = await csv_to_list("haircolors",antilist)
-  const hairstylelist = await csv_to_list("hairstyles",antilist)
-  const hairvomitlist = await csv_to_list("hairvomit",antilist,"/csvfiles/",0,"?",false,false)
+  let descriptorlistPromise =  csv_to_list("descriptors",antilist)
   
-  const humanoidlist = await csv_to_list("humanoids",antilist) // build_dynamic_prompt.py LINE244
-  let imagetypelist = [];
+  
+  // build_dynamic_prompt.py LINE244
+  let imagetypelistPromise: Promise<(string | string[])[]>;
   if(anime_mode || imagetype=="all - anime") {
     if(imagetype == "all")
       imagetype = "all - anime"
-    imagetypelist = await csv_to_list_({csvfilename:"imagetypes_anime",antilist, insanitylevel, delimiter:"?"})
+    imagetypelistPromise = csv_to_list_({csvfilename:"imagetypes_anime",antilist, insanitylevel, delimiter:"?"})
   } else {
-    imagetypelist = await csv_to_list_({csvfilename:"imagetypes",antilist, insanitylevel, delimiter:"?"})
+    imagetypelistPromise = csv_to_list_({csvfilename:"imagetypes",antilist, insanitylevel, delimiter:"?"})
   }
       
-
-  const joblist = await csv_to_list_({csvfilename:"jobs",antilist,skipheader:true,gender})
-  const lenslist = await csv_to_list_({csvfilename:"lenses",antilist, insanitylevel})
-  const lightinglist = await csv_to_list_({csvfilename:"lighting",antilist, insanitylevel})
-  const malefemalelist = await csv_to_list_({csvfilename:"malefemale",antilist,skipheader:true,gender})
-  const manwomanlist = await csv_to_list_({csvfilename:"manwoman",antilist,skipheader:true,gender})
-  const moodlist = await csv_to_list_({csvfilename:"moods",antilist, insanitylevel})
-  const othertypelist = await csv_to_list("othertypes",antilist)
-  const poselist = await csv_to_list("poses",antilist)
-  const qualitylist = await csv_to_list("quality",antilist)
-  const shotsizelist = await csv_to_list_({csvfilename:"shotsizes",antilist, insanitylevel})
-  const timeperiodlist = await csv_to_list("timeperiods",antilist)
+  
   const vomitlist = await csv_to_list_({csvfilename:"vomit",antilist, insanitylevel})
+  
   if(anime_mode) {
     const replacements = {
       "-allstylessuffix-": "-buildfacepart-",
@@ -1408,71 +1368,31 @@ export async function build_dynamic_prompt(
     });
   } // build_dynamic_prompt.py LINE273
 
-  const foodlist = await csv_to_list("foods", antilist)
-  const genderdescriptionlist = await csv_to_list_({csvfilename:"genderdescription",antilist,skipheader:true,gender})
-  const minilocationlist = await csv_to_list("minilocations", antilist)
-  const minioutfitlist = await csv_to_list("minioutfits",antilist,"/csvfiles/",0,"?",false,false,gender)
-  const seasonlist = await csv_to_list("seasons", antilist)
-  const elaborateoutfitlist = await csv_to_list("elaborateoutfits", antilist)
-  const minivomitlist = await csv_to_list("minivomit", antilist)
-  const imagetypequalitylist = await csv_to_list("imagetypequality", antilist)
-  const rpgclasslist = await csv_to_list("rpgclasses", antilist)
-  const brandlist = await csv_to_list("brands", antilist)
-  const spacelist = await csv_to_list("space", antilist)
-  const poemlinelist = await csv_to_list("poemlines", antilist)
-  const songlinelist = await csv_to_list("songlines", antilist)
-  const musicgenrelist = await csv_to_list("musicgenres", antilist)
-  const manwomanrelationlist = await csv_to_list_({csvfilename:"manwomanrelations",antilist,skipheader:true,gender})
-  const manwomanmultiplelist = await csv_to_list_({csvfilename:"manwomanmultiples",antilist,skipheader:true,gender,delimiter:"?"})
-  const waterlocationlist = await csv_to_list("waterlocations", antilist)
-  const containerlist = await csv_to_list("containers", antilist)
-  const firstnamelist = await csv_to_list_({csvfilename:"firstnames",antilist,skipheader:true,gender})
-  const floralist = await csv_to_list("flora", antilist)
-  const printlist = await csv_to_list("prints", antilist)
-  const patternlist = await csv_to_list("patterns", antilist)
-  const chairlist = await csv_to_list("chairs", antilist)
-  const cardnamelist = await csv_to_list("card_names", antilist)
-  const coveringlist = await csv_to_list("coverings", antilist)
-  const facepartlist = await csv_to_list("faceparts", antilist)
-  const outfitvomitlist = await csv_to_list_({csvfilename:"outfitvomit",antilist,delimiter:"?"})
-  const humanvomitlist = await csv_to_list("humanvomit", antilist)
-  const eyecolorlist = await csv_to_list("eyecolors", antilist)
-  const fashiondesignerlist = await csv_to_list("fashiondesigners", antilist)
-  const colorcombinationlist = await csv_to_list("colorcombinations", antilist)
-  const materialcombinationlist = await csv_to_list("materialcombinations", antilist)
-  const agelist = await csv_to_list("ages", antilist)
-  const agecalculatorlist = await csv_to_list("agecalculator", antilist)
-  const elementlist = await csv_to_list("elements", antilist)
-  const settinglist = await csv_to_list("settings", antilist)
-  const charactertypelist = await csv_to_list("charactertypes", antilist)
-  const objectstoholdlist = await csv_to_list("objectstohold", antilist)
-  const episodetitlelist = await csv_to_list_({csvfilename:"episodetitles",antilist,skipheader:true})
-  const flufferlist = await csv_to_list("fluff", antilist)
-  let tokenlist: any[] = []
-  
-  // New set of lists
-  const locationfantasylist = await csv_to_list("locationsfantasy", antilist)
-  const locationscifilist = await csv_to_list("locationsscifi", antilist)
-  const locationvideogamelist = await csv_to_list("locationsvideogame", antilist)
-  const locationbiomelist = await csv_to_list("locationsbiome", antilist)
-  const locationcitylist = await csv_to_list("locationscities", antilist)
-  const birdlist = await csv_to_list("birds", antilist)
-  const catlist = await csv_to_list_({csvfilename:"cats", antilist,delimiter:"?"})
-  const doglist = await csv_to_list_({csvfilename:"dogs", antilist,delimiter:"?"})
-  const insectlist = await csv_to_list("insects", antilist)
-  const pokemonlist = await csv_to_list("pokemon", antilist)
-  const pokemontypelist = await csv_to_list("pokemontypes", antilist)
-  const occultlist = await csv_to_list("occult", antilist)
-  const marinelifelist = await csv_to_list("marinelife", antilist)
-  
-
   // additional descriptor lists
-  const outfitdescriptorlist = await csv_to_list("outfitdescriptors",antilist)
-  const hairdescriptorlist = await csv_to_list("hairdescriptors",antilist)
-  const humandescriptorlist = await csv_to_list("humandescriptors",antilist)
-  const locationdescriptorlist = await csv_to_list("locationdescriptors",antilist)
-  const basicbitchdescriptorlist = await csv_to_list("basicbitchdescriptors",antilist)
-  const animaldescriptorlist = await csv_to_list("animaldescriptors",antilist) // build_dynamic_prompt.py LINE340
+  const outfitdescriptorlistPromise =  csv_to_list("outfitdescriptors",antilist)
+  const hairdescriptorlistPromise =  csv_to_list("hairdescriptors",antilist)
+  const humandescriptorlistPromise =  csv_to_list("humandescriptors",antilist)
+  const locationdescriptorlistPromise =  csv_to_list("locationdescriptors",antilist)
+  const basicbitchdescriptorlistPromise =  csv_to_list("basicbitchdescriptors",antilist)
+  const animaldescriptorlistPromise =  csv_to_list("animaldescriptors",antilist) // build_dynamic_prompt.py LINE340
+
+  let [
+    descriptorlist,
+    outfitdescriptorlist,
+    hairdescriptorlist,
+    humandescriptorlist,
+    locationdescriptorlist,
+    basicbitchdescriptorlist,
+    animaldescriptorlist,
+  ] = await Promise.all([
+    descriptorlistPromise,
+    outfitdescriptorlistPromise,
+    hairdescriptorlistPromise,
+    humandescriptorlistPromise,
+    locationdescriptorlistPromise,
+    basicbitchdescriptorlistPromise,
+    animaldescriptorlistPromise,
+  ])
 
   // descriptorlist becomes one with everything
   const descriptortotallist = [
@@ -1498,6 +1418,32 @@ export async function build_dynamic_prompt(
     }
   }
 
+  const fictionallistPromise = csv_to_list_({csvfilename:"fictional characters",antilist,skipheader:true,gender})
+  const nonfictionallistPromise = csv_to_list_({csvfilename:"nonfictional characters",antilist,skipheader:true,gender})
+  const humanoidlistPromise = csv_to_list("humanoids",antilist)
+  const objectlistPromise = csv_to_list("objects",antilist)
+  const buildinglistPromise =  csv_to_list("buildings",antilist)
+  const vehiclelistPromise =  csv_to_list("vehicles",antilist)
+  const foodlistPromise =  csv_to_list("foods", antilist)
+  const spacelistPromise =  csv_to_list("space", antilist)
+  const floralistPromise =  csv_to_list("flora", antilist)
+  const containerlistPromise =  csv_to_list("containers", antilist)
+  const occultlistPromise =  csv_to_list("occult", antilist)
+
+  let [ fictionallist, nonfictionallist, humanoidlist, objectlist, buildinglist, vehiclelist, foodlist, spacelist, floralist, containerlist, occultlist ] = await Promise.all([
+    fictionallistPromise,
+    nonfictionallistPromise,
+    humanoidlistPromise,
+    objectlistPromise,
+    buildinglistPromise,
+    vehiclelistPromise,
+    foodlistPromise,
+    spacelistPromise,
+    floralistPromise,
+    containerlistPromise,
+    occultlistPromise
+  ])
+
   const humanlist = [...fictionallist, ...nonfictionallist, ...humanoidlist]
   const objecttotallist = [
     ...objectlist,
@@ -1509,6 +1455,18 @@ export async function build_dynamic_prompt(
     ...containerlist,
     ...occultlist
   ];
+
+  const locationlistPromise =  csv_to_list("locations",antilist)
+  const colorlistPromise = csv_to_list("colors",antilist)
+  const musicgenrelistPromise =  csv_to_list("musicgenres", antilist)
+  const seasonlistPromise =  csv_to_list("seasons", antilist)
+  const animallistPromise = csv_to_list("animals",antilist) 
+  const patternlistPromise =  csv_to_list("patterns", antilist)
+
+  let [locationlist, colorlist, musicgenrelist, seasonlist, animallist, patternlist] = await Promise.all([
+    locationlistPromise, colorlistPromise, musicgenrelistPromise, seasonlistPromise, animallistPromise, patternlistPromise
+  ])
+
   const outfitprinttotallist = [
     ...objecttotallist,
     ...locationlist,
@@ -1587,7 +1545,7 @@ export async function build_dynamic_prompt(
     artists != "none" &&
     !artists.startsWith("personal_artists") &&
     !artists.startsWith("personal artists") &&
-    artists in artisttypes
+    artisttypes.includes(artists)
   )
     artistlist = await artist_category_csv_to_list("artists_and_category",artists)
   else if(artists.startsWith("personal_artists") || artists.startsWith("personal artists")) {
@@ -1596,93 +1554,6 @@ export async function build_dynamic_prompt(
   } else if (artists != "none")
     artistlist = await csv_to_list("artists",antilist) // build_dynamic_prompt.py LINE 429
 
-
-  // create special artists lists, used in templates
-  const fantasyartistlist = await artist_category_csv_to_list("artists_and_category","fantasy")
-  const popularartistlist = await artist_category_csv_to_list("artists_and_category","popular")
-  const romanticismartistlist = await artist_category_csv_to_list("artists_and_category","romanticism")
-  const photographyartistlist = await artist_category_csv_to_list("artists_and_category","photography")
-  const portraitartistlist = await artist_category_csv_to_list("artists_and_category","portrait")
-  const characterartistlist = await artist_category_csv_to_list("artists_and_category","character")
-  const landscapeartistlist = await artist_category_csv_to_list("artists_and_category","landscape")
-  const scifiartistlist = await artist_category_csv_to_list("artists_and_category","sci-fi")
-  const graphicdesignartistlist = await artist_category_csv_to_list("artists_and_category","graphic design")
-  const digitalartistlist = await artist_category_csv_to_list("artists_and_category","digital")
-  const architectartistlist = await artist_category_csv_to_list("artists_and_category","architecture")
-  const cinemaartistlist = await artist_category_csv_to_list("artists_and_category","cinema")
-  const gregmodelist = (await csv_to_list("gregmode", antilist)) as string[]
-
-
-  // add any other custom lists
-  const stylestiloralist = await csv_to_list("styles_ti_lora",antilist,"/userfiles/")
-  const generatestyle = Boolean(stylestiloralist?.length)
-
-  const custominputprefixlist = await csv_to_list("custom_input_prefix",antilist,"/userfiles/")
-  let generatecustominputprefix = Boolean(custominputprefixlist?.length)
-
-  const custominputmidlist = await csv_to_list("custom_input_mid",antilist,"/userfiles/")
-  const generatecustominputmid = Boolean(custominputmidlist?.length)
-
-  const custominputsuffixlist = await csv_to_list("custom_input_suffix",antilist,"/userfiles/")
-  const generatecustominputsuffix = Boolean(custominputsuffixlist?.length)
-
-  const customsubjectslist = await csv_to_list("custom_subjects",antilist,"/userfiles/")
-  const customoutfitslist = await csv_to_list("custom_outfits",antilist,"/userfiles/")
-
-  // special lists
-  const backgroundtypelist = await csv_to_list("backgroundtypes", antilist,"/csvfiles/special_lists/",0,"?")
-  const insideshotlist = await csv_to_list("insideshots", antilist,"/csvfiles/special_lists/",0,"?")
-  const photoadditionlist = await csv_to_list("photoadditions", antilist,"/csvfiles/special_lists/",0,"?")
-  let buildhairlist = [], buildoutfitlist = [], humanadditionlist = [], objectadditionslist = [],
-    buildfacelist = [], buildaccessorielist = [], humanactivitylist = [], humanexpressionlist = [];
-  if(less_verbose) {
-    buildhairlist = await csv_to_list("buildhair_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    buildoutfitlist = await csv_to_list("buildoutfit_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    humanadditionlist = await csv_to_list("humanadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    objectadditionslist = await csv_to_list("objectadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    buildfacelist = await csv_to_list("buildface_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    buildaccessorielist = await csv_to_list("buildaccessorie_less_verbose", antilist,"/csvfiles/special_lists/",0,"?")
-    humanactivitylist = await csv_to_list("human_activities_less_verbose",antilist,"/csvfiles/",0,"?",false,false)
-    humanexpressionlist = await csv_to_list("humanexpressions_less_verbose",antilist,"/csvfiles/",0,"?",false,false)
-  } else {
-    buildhairlist = await csv_to_list("buildhair", antilist,"/csvfiles/special_lists/",0,"?")
-    buildoutfitlist = await csv_to_list("buildoutfit", antilist,"/csvfiles/special_lists/",0,"?")
-    humanadditionlist = await csv_to_list("humanadditions", antilist,"/csvfiles/special_lists/",0,"?")
-    objectadditionslist = await csv_to_list("objectadditions", antilist,"/csvfiles/special_lists/",0,"?")
-    buildfacelist = await csv_to_list("buildface", antilist,"/csvfiles/special_lists/",0,"?")
-    buildaccessorielist = await csv_to_list("buildaccessorie", antilist,"/csvfiles/special_lists/",0,"?")
-    humanactivitylist = await csv_to_list("human_activities",antilist,"/csvfiles/",0,"?",false,false)
-    humanexpressionlist = await csv_to_list("humanexpressions",antilist,"/csvfiles/",0,"?",false,false)
-  }
-
-  humanactivitylist = [...humanactivitylist, ...humanactivitycheatinglist]
-
-  const animaladditionlist = await csv_to_list("animaladditions", antilist,"/csvfiles/special_lists/",0,"?")
-  
-  const minilocationadditionslist = await csv_to_list("minilocationadditions", antilist,"/csvfiles/special_lists/",0,"?")
-  const overalladditionlist = await csv_to_list("overalladditions", antilist,"/csvfiles/special_lists/",0,"?")
-  let imagetypemodelist = await csv_to_list("imagetypemodes", antilist,"/csvfiles/special_lists/",0,"?")
-  const miniactivitylist = await csv_to_list("miniactivity", antilist,"/csvfiles/special_lists/",0,"?")
-  const animalsuffixadditionlist = await csv_to_list("animalsuffixadditions", antilist,"/csvfiles/special_lists/",0,"?")
-  const buildfacepartlist = await csv_to_list("buildfaceparts", antilist,"/csvfiles/special_lists/",0,"?")
-  const conceptmixerlist = await csv_to_list("conceptmixer", antilist,"/csvfiles/special_lists/",0,"?")
-  
-  
-  const tokinatorlist = await csv_to_list("tokinator", antilist,"/csvfiles/templates/",0,"?")
-  const styleslist = await csv_to_list("styles", antilist,"/csvfiles/templates/",0,"?")
-  const stylessuffix = styleslist.map(it => it.toString().split('-subject-')[1]) //[item.split('-subject-')[1] for item in styleslist]
-  const breakstylessuffix = stylessuffix.map(item => item.split(',')) //[item.split(',') for item in stylessuffix]
-  let allstylessuffixlist = breakstylessuffix.flat()
-  allstylessuffixlist = Array.from(new Set(allstylessuffixlist))
-
-  const artistsuffix = await artist_descriptions_csv_to_list("artists_and_category")
-  const breakartiststylessuffix = artistsuffix.map(item => item.split(','))
-  let artiststylessuffixlist = breakartiststylessuffix.flat()
-  artiststylessuffixlist = Array.from(new Set(artiststylessuffixlist))
-  allstylessuffixlist = [...allstylessuffixlist, ...artiststylessuffixlist]
-  
-  let dynamictemplatesprefixlist = await csv_to_list("dynamic_templates_prefix", antilist,"/csvfiles/templates/",0,"?")
-  let dynamictemplatessuffixlist = await csv_to_list("dynamic_templates_suffix", antilist,"/csvfiles/templates/",0,"?") // build_dynamic_prompt.py LINE 516
 
   // subjects
   let mainchooserlist: string[] = []
@@ -1758,6 +1629,9 @@ export async function build_dynamic_prompt(
   let subjectbodytypechance = 'normal'
   let subjectculturechance = 'normal'
   let subjectconceptsuffixchance = 'unique'
+
+  const custominputprefixlist = await csv_to_list("custom_input_prefix",antilist,"/userfiles/")
+  let generatecustominputprefix = Boolean(custominputprefixlist?.length)
 
   let subjectlandscapeinsideshotchance = 'unique'
   let subjectlandscapeaddonlocationchance = 'normal'
@@ -2137,6 +2011,28 @@ export async function build_dynamic_prompt(
   generatefictionalcharacter = Boolean(fictionallist?.length) && generatefictionalcharacter
   generatenonfictionalcharacter = Boolean(nonfictionallist?.length) && generatenonfictionalcharacter
   generatehumanoids = Boolean(humanoidlist?.length) && generatehumanoids
+
+  const manwomanrelationlistPromise =  csv_to_list_({csvfilename:"manwomanrelations",antilist,skipheader:true,gender})
+  const manwomanmultiplelistPromise =  csv_to_list_({csvfilename:"manwomanmultiples",antilist,skipheader:true,gender,delimiter:"?"})
+  const manwomanlistPromise =  csv_to_list_({csvfilename:"manwoman",antilist,skipheader:true,gender})
+  const joblistPromise =  csv_to_list_({csvfilename:"jobs",antilist,skipheader:true,gender})
+  const firstnamelistPromise =  csv_to_list_({csvfilename:"firstnames",antilist,skipheader:true,gender})
+  const birdlistPromise =  csv_to_list("birds", antilist)
+  const catlistPromise =  csv_to_list_({csvfilename:"cats", antilist,delimiter:"?"})
+  const doglistPromise =  csv_to_list_({csvfilename:"dogs", antilist,delimiter:"?"})
+  const insectlistPromise =  csv_to_list("insects", antilist)
+  const pokemonlistPromise =  csv_to_list("pokemon", antilist)
+  const pokemontypelistPromise =  csv_to_list("pokemontypes", antilist)
+  const marinelifelistPromise =  csv_to_list("marinelife", antilist)
+
+  let [
+    manwomanlist, manwomanrelationlist, manwomanmultiplelist, joblist, firstnamelist,
+    birdlist, catlist, doglist, insectlist, pokemonlist, pokemontypelist, marinelifelist
+  ] = await Promise.all([
+    manwomanlistPromise, manwomanmultiplelistPromise, manwomanrelationlistPromise, joblistPromise, firstnamelistPromise,
+    birdlistPromise, catlistPromise, doglistPromise, insectlistPromise, pokemonlistPromise, marinelifelistPromise, pokemontypelistPromise
+  ])
+
   generatemanwoman = Boolean(manwomanlist?.length) && generatemanwoman
   generatemanwomanrelation = Boolean(manwomanrelationlist?.length) && generatemanwomanrelation
   generatemanwomanmultiple = Boolean(manwomanmultiplelist?.length) && generatemanwomanmultiple
@@ -2211,6 +2107,17 @@ export async function build_dynamic_prompt(
   if(generateanimaltotal)
     mainchooserlist.push("animal")
 
+  const locationfantasylistPromise =  csv_to_list("locationsfantasy", antilist)
+  const locationscifilistPromise =  csv_to_list("locationsscifi", antilist)
+  const locationvideogamelistPromise =  csv_to_list("locationsvideogame", antilist)
+  const locationbiomelistPromise =  csv_to_list("locationsbiome", antilist)
+  const locationcitylistPromise =  csv_to_list("locationscities", antilist)
+
+  let [locationfantasylist, locationscifilist, locationvideogamelist, locationbiomelist, locationcitylist] = await Promise.all([
+    locationfantasylistPromise, locationscifilistPromise, locationvideogamelistPromise,
+    locationbiomelistPromise, locationcitylistPromise
+  ])
+
   generatelocation = Boolean(locationlist?.length) && generatelocation
   generatelocationfantasy = Boolean(locationfantasylist?.length) && generatelocationfantasy
   generatelocationscifi = Boolean(locationscifilist?.length) && generatelocationscifi
@@ -2239,6 +2146,21 @@ export async function build_dynamic_prompt(
     locationsubjectchooserlist.push("biome")
   if(generatelocationcity)
     locationsubjectchooserlist.push("city")
+
+  const eventlistPromise =  csv_to_list("events",antilist)
+  const cardnamelistPromise =  csv_to_list("card_names", antilist)
+  const episodetitlelistPromise =  csv_to_list_({csvfilename:"episodetitles",antilist,skipheader:true})
+  const poemlinelistPromise =  csv_to_list("poemlines", antilist)
+  const songlinelistPromise =  csv_to_list("songlines", antilist)
+  const conceptprefixlistPromise =  csv_to_list("concept_prefix",antilist)
+  const conceptsuffixlistPromise =  csv_to_list("concept_suffix",antilist)
+  const imagetypemodelistPromise = csv_to_list("imagetypemodes", antilist,"/csvfiles/special_lists/",0,"?")
+  const tokenlistPromise = csv_to_list_({csvfilename:"tokens",antilist,skipheader:true})
+
+  let [eventlist, cardnamelist, episodetitlelist, poemlinelist, songlinelist, conceptprefixlist, conceptsuffixlist, imagetypemodelist] = await Promise.all([
+    eventlistPromise, cardnamelistPromise, episodetitlelistPromise, poemlinelistPromise,
+    songlinelistPromise, conceptprefixlistPromise, conceptsuffixlistPromise, imagetypemodelistPromise
+  ])
   
   generateevent = Boolean(eventlist?.length) && generateevent
   generateconcepts = Boolean(conceptprefixlist?.length) && Boolean(conceptsuffixlist?.length) && generateconcepts
@@ -2361,11 +2283,13 @@ export async function build_dynamic_prompt(
     console.log("Running with a randomized style instead of a randomized prompt")
   }
 
+  let tokenlist: string[] = []
+
   if(imagetype == "the tokinator") {
     specialmode = true
     thetokinatormode = true
     // for performance, load the list here
-    tokenlist = await csv_to_list_({csvfilename:"tokens",antilist,skipheader:true})
+    tokenlist = await tokenlistPromise.then(arr => arr.map(it => it.toString()))
     console.log("Running with a completely random set of words")
     console.log("All safety And logic is turned off")
   }
@@ -2394,54 +2318,61 @@ export async function build_dynamic_prompt(
   generateartist = Boolean(artistlist?.length) && !specialmode
   if(thetokinatormode)
     generateartist = Boolean(artistlist?.length)
+  
+  const outfitlistPromise =  csv_to_list("outfits",antilist)
+  const bodytypelistPromise =  csv_to_list_({csvfilename:"body_types",antilist,skipheader:true,gender})
+  const hairstylelistPromise =  csv_to_list("hairstyles",antilist)
+  const culturelistPromise =  csv_to_list("cultures",antilist)
+  const backgroundtypelistPromise = csv_to_list("backgroundtypes", antilist,"/csvfiles/special_lists/",0,"?")
+  const insideshotlistPromise = csv_to_list("insideshots", antilist,"/csvfiles/special_lists/",0,"?")
+  const accessorielistPromise =  csv_to_list("accessories",antilist,"/csvfiles/",0,"?",false,false,gender)
+  const lenslistPromise =  csv_to_list_({csvfilename:"lenses",antilist, insanitylevel})
+  const lightinglistPromise =  csv_to_list_({csvfilename:"lighting",antilist, insanitylevel})
+  const moodlistPromise =  csv_to_list_({csvfilename:"moods",antilist, insanitylevel})
+  const poselistPromise =  csv_to_list("poses",antilist)
+  const qualitylistPromise =  csv_to_list("quality",antilist)
+  const shotsizelistPromise =  csv_to_list_({csvfilename:"shotsizes",antilist, insanitylevel})
+  const timeperiodlistPromise =  csv_to_list("timeperiods",antilist)
+  const directionlistPromise =  csv_to_list_({csvfilename:"directions",antilist,insanitylevel})
+  const focuslistPromise =  csv_to_list_({csvfilename:"focus",antilist, insanitylevel})
+  const artmovementlistPromise =  csv_to_list("artmovements",antilist)
+  const cameralistPromise =  csv_to_list("cameras",antilist)
+  const colorschemelistPromise =  csv_to_list("colorscheme",antilist)
+
+  let [
+    outfitlist, bodytypelist, hairstylelist, culturelist, backgroundtypelist, insideshotlist, accessorielist, lenslist, lightinglist, moodlist,
+    poselist, qualitylist, shotsizelist, timeperiodlist, directionlist, focuslist, artmovementlist, cameralist, colorschemelist
+  ] = await Promise.all([
+    outfitlistPromise, bodytypelistPromise, hairstylelistPromise, culturelistPromise, backgroundtypelistPromise,
+    insideshotlistPromise, accessorielistPromise, lenslistPromise, lightinglistPromise, moodlistPromise,
+    poselistPromise, qualitylistPromise, shotsizelistPromise, timeperiodlistPromise, directionlistPromise,
+    focuslistPromise, artmovementlistPromise, cameralistPromise, colorschemelistPromise
+  ])
+
   let generateoutfit = Boolean(outfitlist?.length) && !templatemode
   let generatebodytype = Boolean(bodytypelist?.length) && !templatemode
-  let generateaccessorie = Boolean(accessorielist?.length) && !specialmode
-  let generateartmovement = Boolean(artmovementlist?.length) && !specialmode
-  let generatecamera = Boolean(cameralist?.length) && !specialmode
-  let generatecolorscheme = Boolean(colorschemelist?.length) && !specialmode
-  let generatedescriptors = Boolean(descriptorlist?.length) && !templatemode
-  let generatedirection = Boolean(directionlist?.length) && !specialmode
-  let generatefocus = Boolean(focuslist?.length) && !specialmode
   let generatehairstyle = Boolean(hairstylelist?.length) && !templatemode
+  let generatedescriptors = Boolean(descriptorlist?.length) && !templatemode
+  let generatebackground = Boolean(backgroundtypelist?.length) && !specialmode
+  let generateinsideshot = Boolean(insideshotlist?.length) && !specialmode
+  let generateaccessorie = Boolean(accessorielist?.length) && !specialmode
   let generatelens = Boolean(lenslist?.length) && !specialmode
   let generatelighting = Boolean(lightinglist?.length) && !specialmode
   let generatemood = Boolean(moodlist?.length) && !specialmode
   let generatepose = Boolean(poselist?.length) && !templatemode
-  let generatevomit = Boolean(vomitlist?.length) && !specialmode && add_vomit
   let generatequality = Boolean(qualitylist?.length) && !specialmode && add_quality
   let generateshot = Boolean(shotsizelist?.length) && !specialmode
   let generatetimeperiod = Boolean(timeperiodlist?.length) && !specialmode
-  let generateemoji = Boolean(emojilist?.length) && !templatemode
-  let generateface = Boolean(buildfacelist?.length) && !specialmode
-  let generatehumanexpression = Boolean(humanexpressionlist?.length) && !specialmode
-  let generatehumanvomit = Boolean(humanvomitlist?.length) && !specialmode
-
-  // specials:
-  let generatebackground = Boolean(backgroundtypelist?.length) && !specialmode
-  let generateinsideshot = Boolean(insideshotlist?.length) && !specialmode
-  let generatephotoaddition = Boolean(photoadditionlist?.length) && !specialmode
-  generatehairstyle = Boolean(buildhairlist?.length) && !templatemode
-  generateoutfit = Boolean(buildoutfitlist?.length) && !templatemode
-  let generateobjectaddition = Boolean(objectadditionslist?.length) && !templatemode
-  let generatehumanaddition = Boolean(humanadditionlist?.length) && !templatemode
-  let generateanimaladdition = Boolean(animaladditionlist?.length) && !templatemode
-  let generateaccessories = Boolean(buildaccessorielist?.length) && !templatemode
-  let generategreatwork = Boolean(greatworklist?.length) && !specialmode
-  generatepoemline = Boolean(poemlinelist?.length) && !specialmode
-  generatesongline = Boolean(songlinelist?.length) && !specialmode
-  generatecardname = Boolean(cardnamelist?.length) && !specialmode
-  generateepisodetitle = Boolean(episodetitlelist?.length) && !specialmode
-  
-  generateminilocationaddition = Boolean(minilocationadditionslist?.length) && !specialmode
-  let generateminivomit = Boolean(minivomitlist?.length) && !specialmode && add_vomit
-  generateimagetypequality = Boolean(imagetypequalitylist?.length) && !specialmode && generateimagetypequality 
-  let generateoveralladdition = Boolean(overalladditionlist?.length) && !specialmode
-  generateimagetype = Boolean(imagetypelist?.length) && !specialmode && generateimagetype
+  let generatevomit = Boolean(vomitlist?.length) && !specialmode && add_vomit
+  let generatedirection = Boolean(directionlist?.length) && !specialmode
+  let generatefocus = Boolean(focuslist?.length) && !specialmode
+  let generateartmovement = Boolean(artmovementlist?.length) && !specialmode
+  let generatecamera = Boolean(cameralist?.length) && !specialmode
+  let generatecolorscheme = Boolean(colorschemelist?.length) && !specialmode
 
 
   // Smart subject logic
-  let givensubjectlist: string[] = []
+  let givensubjectlist: string[] = [] 
   
   if(givensubject != "" && smartsubject == true) {
     givensubject = givensubject.toLowerCase()
@@ -2632,6 +2563,99 @@ export async function build_dynamic_prompt(
   let subjectchooser = ""
   let mainchooser = ""
 
+
+  const othertypelistPromise =  csv_to_list("othertypes",antilist)
+  const flufferlistPromise =  csv_to_list("fluff", antilist)
+  const minivomitlistPromise =  csv_to_list("minivomit", antilist)
+  const styleslistPromise = csv_to_list("styles", antilist,"/csvfiles/templates/",0,"?")
+  const minilocationadditionslistP = csv_to_list("minilocationadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const materiallistPromise = csv_to_list("materials",antilist)
+  let dynamictemplatesprefixlistP = csv_to_list("dynamic_templates_prefix", antilist,"/csvfiles/templates/",0,"?")
+  const conceptmixerlistP = csv_to_list("conceptmixer", antilist,"/csvfiles/special_lists/",0,"?")
+  const tokinatorlistP = csv_to_list("tokinator", antilist,"/csvfiles/templates/",0,"?")
+  const animaladditionlistP = csv_to_list("animaladditions", antilist,"/csvfiles/special_lists/",0,"?")
+
+  let [
+    imagetypelist, othertypelist, flufferlist, minivomitlist, styleslist, materiallist, minilocationadditionslist, dynamictemplatesprefixlist,
+    conceptmixerlist, tokinatorlist, animaladditionlist,
+  ] = await Promise.all([
+    imagetypelistPromise, othertypelistPromise, flufferlistPromise, minivomitlistPromise, styleslistPromise, materiallistPromise,
+    minilocationadditionslistP, dynamictemplatesprefixlistP, conceptmixerlistP, tokinatorlistP, animaladditionlistP,
+  ])
+
+  generateimagetype = Boolean(imagetypelist?.length) && !specialmode && generateimagetype
+  let generateminivomit = Boolean(minivomitlist?.length) && !specialmode && add_vomit
+  let generateanimaladdition = Boolean(animaladditionlist?.length) && !templatemode
+  generateminilocationaddition = Boolean(minilocationadditionslist?.length) && !specialmode
+
+  const stylessuffix = styleslist.map(it => it.toString().split('-subject-')[1]) //[item.split('-subject-')[1] for item in styleslist]
+  const breakstylessuffix = stylessuffix.map(item => item.split(',')) //[item.split(',') for item in stylessuffix]
+  let allstylessuffixlist = breakstylessuffix.flat()
+  allstylessuffixlist = Array.from(new Set(allstylessuffixlist))
+
+
+  let fantasyartistlist: string[] = [],popularartistlist: string[] = [], romanticismartistlist: string[] = [], photographyartistlist: string[] = [],
+  portraitartistlist: string[] = [], characterartistlist: string[] = [], landscapeartistlist: string[] = [], scifiartistlist: string[] = [],
+  graphicdesignartistlist: string[] = [], digitalartistlist: string[] = [], architectartistlist: string[] = [], cinemaartistlist: string[] = [],
+  imagetypequalitylist: string[] = [];
+  
+  const gregmodelistP = csv_to_list("gregmode", antilist).then(arr => arr.map(it => it.toString()))
+  const stylestiloralistP = csv_to_list("styles_ti_lora",antilist,"/userfiles/")
+  const custominputmidlistP = csv_to_list("custom_input_mid",antilist,"/userfiles/")
+  const humanactivitylistP = less_verbose ? csv_to_list("human_activities_less_verbose",antilist,"/csvfiles/",0,"?",false,false) :
+    csv_to_list("human_activities",antilist,"/csvfiles/",0,"?",false,false)
+  const emojilistPromise =  csv_to_list("emojis",antilist)
+  const objectadditionslistP = less_verbose ? csv_to_list("objectadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?") :
+    csv_to_list("objectadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const humanadditionlistP = less_verbose ? csv_to_list("humanadditions_less_verbose", antilist,"/csvfiles/special_lists/",0,"?") :
+    csv_to_list("humanadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const buildfacelistP = less_verbose ? csv_to_list("buildface_less_verbose", antilist,"/csvfiles/special_lists/",0,"?"):
+    csv_to_list("buildface", antilist,"/csvfiles/special_lists/",0,"?")
+  const buildhairlistP = less_verbose ? csv_to_list("buildhair_less_verbose", antilist,"/csvfiles/special_lists/",0,"?") :
+    csv_to_list("buildhair", antilist,"/csvfiles/special_lists/",0,"?")
+  const buildoutfitlistP = less_verbose ? csv_to_list("buildoutfit_less_verbose", antilist,"/csvfiles/special_lists/",0,"?") :
+    csv_to_list("buildoutfit", antilist,"/csvfiles/special_lists/",0,"?")
+  const buildaccessorielistP = less_verbose ? csv_to_list("buildaccessorie_less_verbose", antilist,"/csvfiles/special_lists/",0,"?") :
+    csv_to_list("buildaccessorie", antilist,"/csvfiles/special_lists/",0,"?")
+  const humanexpressionlistP = less_verbose ? csv_to_list("humanexpressions_less_verbose",antilist,"/csvfiles/",0,"?",false,false) :
+    csv_to_list("humanexpressions",antilist,"/csvfiles/",0,"?",false,false)
+  const overalladditionlistP = csv_to_list("overalladditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const photoadditionlistP = csv_to_list("photoadditions", antilist,"/csvfiles/special_lists/",0,"?")
+  const humanvomitlistPromise =  csv_to_list("humanvomit", antilist)
+  const greatworklistPromise =  csv_to_list("greatworks",antilist)
+  const dynamictemplatessuffixlistP = csv_to_list("dynamic_templates_suffix", antilist,"/csvfiles/templates/",0,"?")
+  const custominputsuffixlistP = csv_to_list("custom_input_suffix",antilist,"/userfiles/")
+  const minioutfitlistPromise =  csv_to_list("minioutfits",antilist,"/csvfiles/",0,"?",false,false,gender)
+  const imagetypequalityP = csv_to_list("imagetypequality", antilist).then(arr => imagetypequalitylist = arr.map(it => it.toString()))
+
+  let [
+    gregmodelist, stylestiloralist, custominputmidlist, humanactivitylist, emojilist, objectadditionslist, humanadditionlist,
+    buildfacelist, humanexpressionlist, overalladditionlist, buildhairlist, buildoutfitlist, buildaccessorielist,
+    photoadditionlist, humanvomitlist, greatworklist, custominputsuffixlist,
+  ] = await Promise.all([
+    gregmodelistP, stylestiloralistP, custominputmidlistP, humanactivitylistP, emojilistPromise, objectadditionslistP,
+    humanadditionlistP, buildfacelistP, humanexpressionlistP, overalladditionlistP, buildhairlistP, buildoutfitlistP,
+    buildaccessorielistP, photoadditionlistP, humanvomitlistPromise, greatworklistPromise, custominputsuffixlistP, 
+  ])
+
+  let wildcardFilesLoaded = false
+  const generatestyle = Boolean(stylestiloralist?.length)
+  let generateemoji = Boolean(emojilist?.length) && !templatemode
+  let generateobjectaddition = Boolean(objectadditionslist?.length) && !templatemode
+  let generatehumanaddition = Boolean(humanadditionlist?.length) && !templatemode
+  let generateoveralladdition = Boolean(overalladditionlist?.length) && !specialmode
+  let generatehumanexpression = Boolean(humanexpressionlist?.length) && !specialmode
+  let generateface = Boolean(buildfacelist?.length) && !specialmode
+  const generatecustominputmid = Boolean(custominputmidlist?.length)
+  generatehairstyle = Boolean(buildhairlist?.length) && !templatemode
+  generateoutfit = Boolean(buildoutfitlist?.length) && !templatemode
+  let generateaccessories = Boolean(buildaccessorielist?.length) && !templatemode
+  let generatephotoaddition = Boolean(photoadditionlist?.length) && !specialmode
+  let generatehumanvomit = Boolean(humanvomitlist?.length) && !specialmode
+  let generategreatwork = Boolean(greatworklist?.length) && !specialmode
+  const generatecustominputsuffix = Boolean(custominputsuffixlist?.length)
+  generateimagetypequality = Boolean(imagetypequalitylist?.length) && !specialmode && generateimagetypequality 
+
   while (compoundcounter < promptstocompound) {
     let isphoto = 0
     let othertype = 0
@@ -2724,13 +2748,13 @@ export async function build_dynamic_prompt(
       // we want it to be MORE diverce when the insanity level raises
       // in this case, raise the chance for a humanoid, gets more wierd when going above 5
 
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "concept" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("concept"))
         mainchooserlist =  mainchooserlist.filter(it => it !== "concept")
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "landscape" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("landscape"))
         mainchooserlist =  mainchooserlist.filter(it => it !== "landscape")
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "object" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("object"))
         mainchooserlist =  mainchooserlist.filter(it => it !== "object")
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "animal" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("animal"))
         mainchooserlist =  mainchooserlist.filter(it => it !== "animal")
     } // build_dynamic_prompt.py LINE 1485
 
@@ -2738,32 +2762,32 @@ export async function build_dynamic_prompt(
     // Some new logic, lets base the main chooser list on the chosen art category, to make it more cohorent
     artiststylelistforchecking = ["architecture","bauhaus", "cityscape", "cinema", "cloudscape","impressionism",	"installation",	"landscape","magical realism",	"nature", "romanticism","seascape",	"space",	"streetscape"]
 
-    if((artiststyleselector in artiststylelistforchecking
-        || artists in artiststylelistforchecking)
+    if((artiststylelistforchecking.includes(artiststyleselector)
+        || artiststylelistforchecking.includes(artists))
         && (forcesubject == "all" || forcesubject == "")
     ) {
       // remove the shizzle based on chance?
       // we want it to be MORE diverce when the insanity level raises
       // in this case, raise the chance for a landscape, gets more wierd when going above 5
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "concept" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("concept"))
         arrayRemove(mainchooserlist, "concept") // mainchooserlist.remove("concept")
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "animal" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("animal"))
         arrayRemove(mainchooserlist, "animal")
-      if(randint(0,6) > Math.max(2,insanitylevel -2) && "object" in mainchooserlist)
+      if(randint(0,6) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("object"))
         arrayRemove(mainchooserlist, "object")
-      if(randint(0,8) > Math.max(2,insanitylevel -2) && "humanoid" in mainchooserlist)
+      if(randint(0,8) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("humanoid"))
         arrayRemove(mainchooserlist, "humanoid")
     }
 
     //focus in animemode on mostly humans
     if(anime_mode && (forcesubject == "all" || forcesubject == "")) {
-      if(randint(0,11) > Math.max(2,insanitylevel -2) && "concept" in mainchooserlist)
+      if(randint(0,11) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("concept" ))
         arrayRemove(mainchooserlist, "concept")
-      if(randint(0,11) > Math.max(2,insanitylevel -2) && "landscape" in mainchooserlist)
+      if(randint(0,11) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("landscape"))
         arrayRemove(mainchooserlist, "landscape")
-      if(randint(0,11) > Math.max(2,insanitylevel -2) && "object" in mainchooserlist)
+      if(randint(0,11) > Math.max(2,insanitylevel -2) && mainchooserlist.includes("object"))
         arrayRemove(mainchooserlist, "object")
-      if(randint(0,8) > Math.max(2,insanitylevel -2) && "animal" in mainchooserlist)
+      if(randint(0,8) > Math.max(2,insanitylevel -2) &&  mainchooserlist.includes("animal"))
         arrayRemove(mainchooserlist, "animal")
     }
 
@@ -2787,22 +2811,22 @@ export async function build_dynamic_prompt(
       // lower values even more stable
       // Upper values are still quite random
       const humanoidsubjectchooserlistbackup = humanoidsubjectchooserlist.slice() // make a backup of the list
-      if(randint(0,20) > Math.max(2,insanitylevel -2) && "manwomanrelation" in humanoidsubjectchooserlist)
+      if(randint(0,20) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("manwomanrelation"))
         arrayRemove(humanoidsubjectchooserlist, "manwomanrelation")
-      if(randint(0,30) > Math.max(2,insanitylevel -2) && "manwomanmultiple" in humanoidsubjectchooserlist)
+      if(randint(0,30) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("manwomanmultiple"))
         arrayRemove(humanoidsubjectchooserlist, "manwomanmultiple")
-      if(randint(0,7) > Math.max(2,insanitylevel -2) && "firstname" in humanoidsubjectchooserlist)
+      if(randint(0,7) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("firstname"))
         arrayRemove(humanoidsubjectchooserlist, "firstname")
-      if(randint(0,5) > Math.max(2,insanitylevel -2) && "job" in humanoidsubjectchooserlist)
+      if(randint(0,5) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("job"))
         arrayRemove(humanoidsubjectchooserlist, "job")
-      if(randint(0,5) > Math.max(2,insanitylevel -2) && "fictional" in humanoidsubjectchooserlist)
+      if(randint(0,5) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("fictional"))
         arrayRemove(humanoidsubjectchooserlist, "fictional")
-      if(randint(0,5) > Math.max(2,insanitylevel -2) && "non fictional" in humanoidsubjectchooserlist)
+      if(randint(0,5) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("non fictional"))
         arrayRemove(humanoidsubjectchooserlist, "non fictional")
-      if(randint(0,5) > Math.max(2,insanitylevel -2) && "humanoid" in humanoidsubjectchooserlist)
+      if(randint(0,5) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("humanoid"))
         arrayRemove(humanoidsubjectchooserlist, "humanoid")
       // more random stuff on higher levels
-      if(randint(0,4) > Math.max(2,insanitylevel -2) && "human" in humanoidsubjectchooserlist)
+      if(randint(0,4) > Math.max(2,insanitylevel -2) && humanoidsubjectchooserlist.includes("human"))
         arrayRemove(humanoidsubjectchooserlist, "human")
 
       // if we accidently remove everything, then restore the backup list
@@ -2861,7 +2885,7 @@ export async function build_dynamic_prompt(
 
     // After we chose the subject, lets set all things ready for He/She/It etc
     
-    if(!less_verbose && (subjectchooser in ["manwomanmultiple"]) && givensubject != '' && subtypehumanoid != "multiple humans") {
+    if(!less_verbose && (["manwomanmultiple"].includes(subjectchooser)) && givensubject != '' && subtypehumanoid != "multiple humans") {
       heshelist = ["they"]
       hisherlist = ["their"]
       himherlist = ["them"]
@@ -2871,7 +2895,7 @@ export async function build_dynamic_prompt(
         hisherlist = ["one of their"]
         himherlist = ["one of them"]
       }
-    } else if(!less_verbose && subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","firstname","manwomanmultiple"]) {
+    } else if(!less_verbose && ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","firstname","manwomanmultiple"].includes(subjectchooser)) {
       if(gender == "male") {
         heshelist = ["he"]
         hisherlist = ["his"]
@@ -2883,7 +2907,7 @@ export async function build_dynamic_prompt(
         himherlist = ["her"]
       }
     }
-    if(!less_verbose && subjectchooser in ["manwomanmultiple"] && givensubject == "") {
+    if(!less_verbose && ["manwomanmultiple"].includes(subjectchooser) && givensubject == "") {
       heshelist = ["they"]
       hisherlist = ["their"]
       himherlist = ["them"]
@@ -3090,19 +3114,19 @@ export async function build_dynamic_prompt(
       }
       // in case we have ALL, we can also do a specific artist mode per chosen subject. sometimes
       else if(originalartistchoice == "all" && randint(0,3) == 0) {
-        if(mainchooser in ["humanoid", "animal"]){
+        if(["humanoid", "animal"].includes(mainchooser)){
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-portraitartist-;-characterartist-), OR(-portraitartist-;-characterartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
 
-        else if(mainchooser in ["landscape"]) {
+        else if(["landscape"].includes(mainchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-digitalartist-), OR(-landscapeartist-;-graphicdesignartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
 
-        else if(subjectchooser in ["building"]) {
+        else if(["building"].includes(subjectchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-architectartist-), OR(-landscapeartist-;-architectartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
@@ -3136,7 +3160,7 @@ export async function build_dynamic_prompt(
           artistmode = artistmodeslist[modeselector]
           if(advancedprompting == false)
             artistmode = "normal"
-          if (artistmode in ["hybrid","switching"] && end - step == 1)
+          if (["hybrid","switching"].includes(artistmode) && end - step == 1)
             artistmode = "normal"
         }
         
@@ -3148,7 +3172,7 @@ export async function build_dynamic_prompt(
         if(onlyartists && step == end)
           step = step - 1
 
-        if (artistmode in ["hybrid", "stopping", "adding","switching"])
+        if (["hybrid", "stopping", "adding","switching"].includes(artistmode))
           completeprompt += " ["
             
         while (step < end) {
@@ -3176,9 +3200,9 @@ export async function build_dynamic_prompt(
           if (isweighted == 1)
             completeprompt += ":" + (1 + (randint(-3,3)/10)).toString() + ")"       
           
-          if (artistmode in ["hybrid"] && !(end - step == 1))
+          if (["hybrid"].includes(artistmode) && !(end - step == 1))
             completeprompt += "|"
-          if (artistmode in ["switching"] && !(end - step == 1))
+          if (["switching"].includes(artistmode) && !(end - step == 1))
             completeprompt += ":"
           
           if (!(["hybrid", "switching"].includes(artistmode)) && !(end - step > 1))
@@ -3191,19 +3215,38 @@ export async function build_dynamic_prompt(
           step = step + 1
         }
 
-        if (artistmode in ["stopping"]) {
+        if (["stopping"].includes(artistmode)) {
           completeprompt += "::"
           completeprompt += randint(1,19).toString()
         }
         
-        if (artistmode in ["switching","adding"])
+        if (["switching","adding"].includes(artistmode))
           completeprompt += ":" + randint(1,18)
-        if (artistmode in ["hybrid", "stopping","adding", "switching"])
+        if (["hybrid", "stopping","adding", "switching"].includes(artistmode))
           completeprompt += "] "
       }
 
 
       if(onlyartists) {
+        if (!wildcardFilesLoaded) {
+          const obj = await artist_style_cols()
+          gregmodelist = await gregmodelistP.then(arr => arr.map(x => x.toString()))
+          fantasyartistlist = obj.fantasyartistlist
+          popularartistlist = obj.popularartistlist
+          romanticismartistlist = obj.romanticismartistlist
+          photographyartistlist = obj.photographyartistlist
+          portraitartistlist = obj.portraitartistlist
+          characterartistlist = obj.characterartistlist
+          landscapeartistlist = obj.landscapeartistlist
+          scifiartistlist = obj.scifiartistlist
+          graphicdesignartistlist = obj.graphicdesignartistlist
+          digitalartistlist = obj.digitalartistlist
+          architectartistlist = obj.architectartistlist
+          cinemaartistlist = obj.cinemaartistlist
+          wildcardFilesLoaded = true
+          humanactivitylist = [...humanactivitylist, ...humanactivitycheatinglist]
+        }
+
         //Parse or statements
         completeprompt = parse_custom_functions(completeprompt, insanitylevel)
 
@@ -3240,7 +3283,7 @@ export async function build_dynamic_prompt(
         completeprompt += "-artiststyle- art, "
 
 
-      if (artistmode in ["enhancing"])
+      if (["enhancing"].includes(artistmode))
         completeprompt += " ["
     } // build_dynamic_prompt.py LINE 1969
     
@@ -3371,11 +3414,11 @@ export async function build_dynamic_prompt(
 
     // start shot size
 
-    if(mainchooser in ["object", "animal", "humanoid", "concept"] && othertype == 0 && !completeprompt.includes('portrait') && generateshot && chance_roll(insanitylevel,shotsizechance))
+    if(["object", "animal", "humanoid", "concept"].includes(mainchooser) && othertype == 0 && !completeprompt.includes('portrait') && generateshot && chance_roll(insanitylevel,shotsizechance))
       completeprompt += "-shotsize- of a "
     else if(completeprompt.includes('portrait') && generateshot && !partlystylemode)
       completeprompt += " , close up of a "
-    else if(mainchooser in ["landscape"] && generateshot && !partlystylemode)
+    else if(["landscape"].includes(mainchooser) && generateshot && !partlystylemode)
       completeprompt += " landscape of a "
     else if(generateshot)
       completeprompt += ", "
@@ -3396,7 +3439,7 @@ export async function build_dynamic_prompt(
       // outfitmode = 2 IS NORMAL
       if(overrideoutfit!="")
           outfitmode = 2
-      if(animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"] && chance_roll(insanitylevel, outfitchance) && generateoutfit && humanspecial != 1) {
+      if(animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"].includes(subjectchooser) && chance_roll(insanitylevel, outfitchance) && generateoutfit && humanspecial != 1) {
         if(randint(0,10)==0)
           outfitmode = 1
         else
@@ -3415,7 +3458,7 @@ export async function build_dynamic_prompt(
         completeprompt += " " + givensubjectpromptlist[0] + " "
 
       // Once in a very rare while, we get a ... full of ...s
-      if(novel_dist(insanitylevel) && (animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","firstname"])) {
+      if(novel_dist(insanitylevel) && (animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","firstname"].includes(subjectchooser))) {
         buildingfullmode = true
         insideshot = 1
         heshelist = ["they"]
@@ -3429,7 +3472,7 @@ export async function build_dynamic_prompt(
       if(descriptorsintheback < 2) {
         // Common to have 1 description, uncommon to have 2
         if(chance_roll(insanitylevel, subjectdescriptor1chance) && generatedescriptors) {
-          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) {
+          if(animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser)) {
             if(anime_mode && randint(0,2) < 2)
               completeprompt += "-basicbitchdescriptor- "
             else
@@ -3444,7 +3487,7 @@ export async function build_dynamic_prompt(
         }
 
         if(chance_roll(insanitylevel, subjectdescriptor2chance) && generatedescriptors) {
-          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) {
+          if(animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser)) {
             if(anime_mode && randint(0,2) < 2)
               completeprompt += "-basicbitchdescriptor- "
             else
@@ -3460,17 +3503,17 @@ export async function build_dynamic_prompt(
       }
       
       // color, for animals, landscape, objects and concepts
-      if(mainchooser in ["animal", "object", "landscape", "concept"] && unique_dist(insanitylevel))
+      if(["animal", "object", "landscape", "concept"].includes(mainchooser) && unique_dist(insanitylevel))
         completeprompt += " OR(-color-;-colorcombination-) "
       
       // age, very rare to add.
-      if(subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"] && extraordinary_dist(insanitylevel))
+      if(["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser) && extraordinary_dist(insanitylevel))
         completeprompt += randint(20,99) + " OR(y.o.;year old) "
 
-      if((animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) && chance_roll(insanitylevel, subjectbodytypechance) && generatebodytype)
+      if((animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, subjectbodytypechance) && generatebodytype)
         completeprompt += "-bodytype- "
 
-      if((animalashuman || subjectchooser in ["object","human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"]) && chance_roll(insanitylevel, subjectculturechance) && generatedescriptors)
+      if((animalashuman || ["object","human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, subjectculturechance) && generatedescriptors)
         completeprompt += "-culture- "
 
       if(mainchooser == "object"){
@@ -3605,7 +3648,7 @@ export async function build_dynamic_prompt(
 
       // move job or activity logic here. We want to place it at 2 different places maybe
       
-      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"])  && chance_roll(insanitylevel, joboractivitychance) && humanspecial != 1 && generatesubject) {
+      if((animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation", "manwomanmultiple","firstname"].includes(subjectchooser))  && chance_roll(insanitylevel, joboractivitychance) && humanspecial != 1 && generatesubject) {
         genjoboractivity = true
         const genjoboractivitylocationslist = ["front","middle", "middle","back","back", "back"]
         genjoboractivitylocation = randomChoice(genjoboractivitylocationslist)
@@ -3899,7 +3942,7 @@ export async function build_dynamic_prompt(
       if(descriptorsintheback == 2) {
         // Common to have 1 description, uncommon to have 2
         if(chance_roll(insanitylevel, subjectdescriptor1chance) && generatedescriptors) {
-          if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"]) {
+          if(animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"].includes(subjectchooser)) {
             if(less_verbose) {
               if(anime_mode && randint(0,2) < 2)
                 completeprompt += ", -basicbitchdescriptor- "
@@ -3933,7 +3976,7 @@ export async function build_dynamic_prompt(
           }
 
           if(chance_roll(insanitylevel, subjectdescriptor2chance) && generatedescriptors) {
-            if(animalashuman || subjectchooser in ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) {
+            if(animalashuman || ["human", "job", "fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"].includes(subjectchooser)) {
               if(less_verbose)
                 completeprompt += ", -humandescriptor- "
               else
@@ -3979,7 +4022,7 @@ export async function build_dynamic_prompt(
   
   
       // riding an animal, holding an object or driving a vehicle, rare
-      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, humanadditionchance) && generatehumanaddition) {
+      if((animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, humanadditionchance) && generatehumanaddition) {
         humanspecial = 1
         completeprompt += "-humanaddition- "
       }
@@ -3993,11 +4036,11 @@ export async function build_dynamic_prompt(
 
       // SD understands emoji's. Can be used to manipulate facial expressions.
       // emoji, legendary
-      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, emojichance) && generateemoji)
+      if((animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, emojichance) && generateemoji)
           completeprompt += "-emoji-, "
 
       // human expressions
-      if((animalashuman || subjectchooser in ["animal as human,","human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"]) && chance_roll(insanitylevel, humanexpressionchance) && generatehumanexpression)
+      if((animalashuman || ["animal as human,","human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple","firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, humanexpressionchance) && generatehumanexpression)
         completeprompt += "-humanexpression-, "
           
 
@@ -4016,7 +4059,7 @@ export async function build_dynamic_prompt(
       }
 
       // add face builder sometimes on generic humans
-      if(subjectchooser in ["human", "humanoid", "manwomanrelation","firstname"] && chance_roll(insanitylevel, buildfacechance) && generateface)
+      if(["human", "humanoid", "manwomanrelation","firstname"].includes(subjectchooser) && chance_roll(insanitylevel, buildfacechance) && generateface)
         completeprompt += randomChoice(buildfacelist) + ", "
 
       // custom mid list
@@ -4041,16 +4084,16 @@ export async function build_dynamic_prompt(
           completeprompt += " -outfitvomit-, "
       }
       
-      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"])  && chance_roll(insanitylevel, posechance) && humanspecial != 1 && generatepose)
+      if((animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"].includes(subjectchooser))  && chance_roll(insanitylevel, posechance) && humanspecial != 1 && generatepose)
         completeprompt += randomChoice(poselist) + ", "
       
-      if(subjectchooser in ["human","job","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"] && chance_roll(insanitylevel, hairchance) && generatehairstyle) {
+      if(["human","job","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"].includes(subjectchooser) && chance_roll(insanitylevel, hairchance) && generatehairstyle) {
         completeprompt += randomChoice(buildhairlist) + ", "
         if(unique_dist(insanitylevel))
           completeprompt += " -hairvomit-, "
       }
 
-      if((animalashuman || subjectchooser in ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"]) && chance_roll(insanitylevel, accessorychance) && generateaccessorie && generateaccessories)
+      if((animalashuman || ["human","fictional", "non fictional", "humanoid", "manwomanrelation","manwomanmultiple", "firstname"].includes(subjectchooser)) && chance_roll(insanitylevel, accessorychance) && generateaccessorie && generateaccessories)
         completeprompt += randomChoice(buildaccessorielist) + ", "
 
       if(chance_roll(insanitylevel, humanoidinsideshotchance) && !["landscape", "concept"].includes(subjectchooser) && generateinsideshot) {
@@ -4062,7 +4105,7 @@ export async function build_dynamic_prompt(
         completeprompt += randomChoice(backgroundtypelist) + ", "
 
       // minilocation bit
-      if(subjectchooser in ["landscape"] && chance_roll(insanitylevel, landscapeminilocationchance) && generateminilocationaddition)
+      if(["landscape"].includes(subjectchooser) && chance_roll(insanitylevel, landscapeminilocationchance) && generateminilocationaddition)
         completeprompt += " -minilocationaddition-, "
           
       if(chance_roll(insanitylevel, generalminilocationchance) && generateminilocationaddition)
@@ -4100,19 +4143,19 @@ export async function build_dynamic_prompt(
         // in case we have ALL, we can also do a specific artist mode per chosen subject. sometimes
       }
       else if(originalartistchoice == "all" && randint(0,3) == 0) {
-        if(mainchooser in ["humanoid", "animal"]) {
+        if(["humanoid", "animal"].includes(mainchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-portraitartist-;-characterartist-), OR(-portraitartist-;-characterartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
 
-        else if(mainchooser in ["landscape"]) {
+        else if(["landscape"].includes(mainchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-digitalartist-), OR(-landscapeartist-;-graphicdesignartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
 
-        else if(subjectchooser in ["building"]) {
+        else if(["building"].includes(subjectchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-architectartist-), OR(-landscapeartist-;-architectartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
@@ -4146,14 +4189,14 @@ export async function build_dynamic_prompt(
           artistmode = artistmodeslist[modeselector]
           if(!advancedprompting)
             artistmode = "normal"
-          if (artistmode in ["hybrid","switching"] && end - step == 1)
+          if (["hybrid","switching"].includes(artistmode) && end - step == 1)
             artistmode = "normal"
         }
         // if there are not enough artists in the list, then just go normal
         if(artistlist.length < 3)
           artistmode = "normal"
         
-        if (artistmode in ["hybrid", "stopping", "adding","switching"])
+        if (["hybrid", "stopping", "adding","switching"].includes(artistmode))
           completeprompt += " ["
             
         while (step < end) {
@@ -4181,9 +4224,9 @@ export async function build_dynamic_prompt(
           if (isweighted == 1)
             completeprompt += ":" + (1 + (randint(-3,3)/10)).toString() + ")"       
           
-          if (artistmode in ["hybrid"] && end - step != 1)
+          if (["hybrid"].includes(artistmode) && end - step != 1)
             completeprompt += "|"
-          if (artistmode in ["switching"] && end - step != 1)
+          if (["switching"].includes(artistmode) && end - step != 1)
             completeprompt += ":"
       
           if (!["hybrid", "switching"].includes(artistmode) && end - step != 1)
@@ -4194,14 +4237,14 @@ export async function build_dynamic_prompt(
           step = step + 1
         }
 
-        if (artistmode in ["stopping"]) {
+        if (["stopping"].includes(artistmode)) {
           completeprompt += "::"
           completeprompt += randint(1,19)
         }
         
-        if (artistmode in ["switching","adding"])
+        if (["switching","adding"].includes(artistmode))
           completeprompt += ":" + randint(1,18)
-        if (artistmode in ["hybrid", "stopping","adding", "switching"])
+        if (["hybrid", "stopping","adding", "switching"].includes(artistmode))
           completeprompt += "] "
         
         completeprompt += ", "
@@ -4461,6 +4504,7 @@ export async function build_dynamic_prompt(
     } // build_dynamic_prompt.py LINE 3102
 
     if(dynamictemplatesmode && common_dist(insanitylevel) && templatesmodechance == 0) {
+      let dynamictemplatessuffixlist = await dynamictemplatessuffixlistP
       if(completeprompt.includes("-artist-") || artists == "none") {
         dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artist-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artist-" not in sentence.lower()]
         dynamictemplatessuffixlist = dynamictemplatessuffixlist.filter(it => !it.toString().toLowerCase().includes("-artiststyle-")) // [sentence for sentence in dynamictemplatessuffixlist if "-artiststyle-" not in sentence.lower()]
@@ -4540,18 +4584,18 @@ export async function build_dynamic_prompt(
       }
       // in case we have ALL, we can also do a specific artist mode per chosen subject. sometimes
       else if(originalartistchoice == "all" && randint(0,3) == 0) {
-        if(mainchooser in ["humanoid", "animal"]) {
+        if(["humanoid", "animal"].includes(mainchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-portraitartist-;-characterartist-), OR(-portraitartist-;-characterartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
-        else if(mainchooser in ["landscape"]) {
+        else if(["landscape"].includes(mainchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-digitalartist-), OR(-landscapeartist-;-graphicdesignartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
         }
     
-        else if(subjectchooser in ["building"]) {
+        else if(["building"].includes(subjectchooser)) {
           artistbylist = ["art by", "designed by", "stylized by", "by"]
           completeprompt += randomChoice(artistbylist) + " OR(-landscapeartist-;-architectartist-), OR(-landscapeartist-;-architectartist-) OR(;and OR(-fantasyartist-;-scifiartist-;-photographyartist-;-digitalartist-;-graphicdesignartist-);uncommon), "
           doartistnormal = false
@@ -4577,14 +4621,14 @@ export async function build_dynamic_prompt(
           artistmode = artistmodeslist[modeselector]
           if(advancedprompting == false)
             artistmode = "normal"
-          if (artistmode in ["hybrid","switching"] && end - step == 1)
+          if (["hybrid","switching"].includes(artistmode) && end - step == 1)
             artistmode = "normal"
         }
         // if there are not enough artists in the list, then just go normal
         if(artistlist.length < 3)
           artistmode = "normal"
         
-        if (artistmode in ["hybrid", "stopping", "adding","switching"])
+        if (["hybrid", "stopping", "adding","switching"].includes(artistmode))
           completeprompt += " ["
             
         while (step < end) {
@@ -4611,9 +4655,9 @@ export async function build_dynamic_prompt(
           if (isweighted == 1)
             completeprompt += ":" + (1 + (randint(-3,3)/10)).toString() + ")"       
           
-          if (artistmode in ["hybrid"] && !(end - step == 1))
+          if (["hybrid"].includes(artistmode) && !(end - step == 1))
             completeprompt += "|"
-          if (artistmode in ["switching"] && !(end - step == 1))
+          if (["switching"].includes(artistmode) && !(end - step == 1))
             completeprompt += ":"
     
           if (!["hybrid", "switching"].includes(artistmode) && !(end - step == 1))
@@ -4625,14 +4669,14 @@ export async function build_dynamic_prompt(
     
         } // build_dynamic_prompt.py LINE 3260
     
-        if (artistmode in ["stopping"]) {
+        if (["stopping"].includes(artistmode)) {
           completeprompt += "::"
           completeprompt += randint(1,19)
         }
         
-        if (artistmode in ["switching","adding"])
+        if (["switching","adding"].includes(artistmode))
           completeprompt += ":" + randint(1,18)
-        if (artistmode in ["hybrid", "stopping","adding", "switching"])
+        if (["hybrid", "stopping","adding", "switching"].includes(artistmode))
           completeprompt += "] "
       }
     } // build_dynamic_prompt.py LINE 3270
@@ -4686,11 +4730,32 @@ export async function build_dynamic_prompt(
 
   customizedLogger('99-1', completeprompt);
 
+  if (!wildcardFilesLoaded) {
+    const obj = await artist_style_cols()
+    gregmodelist = await gregmodelistP.then(arr => arr.map(x => x.toString()))
+    fantasyartistlist = obj.fantasyartistlist
+    popularartistlist = obj.popularartistlist
+    romanticismartistlist = obj.romanticismartistlist
+    photographyartistlist = obj.photographyartistlist
+    portraitartistlist = obj.portraitartistlist
+    characterartistlist = obj.characterartistlist
+    landscapeartistlist = obj.landscapeartistlist
+    scifiartistlist = obj.scifiartistlist
+    graphicdesignartistlist = obj.graphicdesignartistlist
+    digitalartistlist = obj.digitalartistlist
+    architectartistlist = obj.architectartistlist
+    cinemaartistlist = obj.cinemaartistlist
+    wildcardFilesLoaded = true
+    humanactivitylist = [...humanactivitylist, ...humanactivitycheatinglist]
+  }
+
+  customizedLogger('99-2', completeprompt);
+
   // In front and the back?
   if(!dynamictemplatesmode)
     completeprompt = parse_custom_functions(completeprompt, insanitylevel)
 
-  customizedLogger('99-2', completeprompt);
+  customizedLogger('99-3', completeprompt);
   
   // Sometimes change he/she to the actual subject
   // Doesnt work if someone puts in a manual subject
@@ -4714,10 +4779,10 @@ export async function build_dynamic_prompt(
     completeprompt = completeprompt_list.join("")
   }
 
-  customizedLogger('99-2', completeprompt);
+  customizedLogger('99-4', completeprompt);
   
   // Sometimes change he/she to the actual subject
-  if((mainchooser in  ["animal", "object"]) && (givensubject == "" || (subjectingivensubject && givensubject != ""))) {
+  if(["animal", "object"].includes(mainchooser) && (givensubject == "" || (subjectingivensubject && givensubject != ""))) {
     let sameobjectreplacementlist = ["-heshe-","-heshe-","-heshe-","-heshe-","-heshe-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-", "-sameothersubject-"]
     shuffle(sameobjectreplacementlist)
 
@@ -4738,7 +4803,7 @@ export async function build_dynamic_prompt(
     completeprompt = completeprompt_list.join('')
   }
 
-  customizedLogger('99-3', completeprompt);
+  customizedLogger('99-5', completeprompt);
 
   // hair descriptor
   if(rare_dist(insanitylevel)) // Use base hair descriptor, until we are not.
@@ -4770,6 +4835,8 @@ export async function build_dynamic_prompt(
     completeprompt = completeprompt.replaceAll("-outfitdescriptor-", "-descriptor-")
 
   customizedLogger('100-1', completeprompt);
+
+  const minioutfitlist = await minioutfitlistPromise;
   
   // if -outfit- is in the override, we want a consistent result
   if(overrideoutfit.includes("-outfit-")) {
@@ -4858,14 +4925,72 @@ export async function build_dynamic_prompt(
 
   customizedLogger('102-2', completeprompt);
 
+  let allwildcardlistloaded = false;
+
+  let haircolorlist: string[] = [], genderdescriptionlist: string[] = [], malefemalelist: string[] = [],
+  minilocationlist: string[] = [], elaborateoutfitlist: string[] = [], rpgclasslist: string[] = [], customsubjectslist: string[] = [],
+  brandlist: string[] = [], customoutfitslist: string[] = [], waterlocationlist: string[] = [],
+  printlist: string[] = [], facepartlist: string[] = [], miniactivitylist: string[] = [], animalsuffixadditionlist: string[] = [],
+  chairlist: string[] = [], coveringlist: string[] = [], hairvomitlist: string[] = [], buildfacepartlist: string[] = [], outfitvomitlist: string[] = [],
+  eyecolorlist: string[] = [], fashiondesignerlist: string[] = [], colorcombinationlist: string[] = [], materialcombinationlist: string[] = [],
+  oppositefictionallist: string[] = [], oppositenonfictionallist: string[] = [], agelist: string[] = [], agecalculatorlist: string[] = [], settinglist: string[] = [],
+  charactertypelist: string[] = [], objectstoholdlist: string[] = [], backgroundlist: string[] = [], elementlist: string[] = []
+
   while (check_completeprompt_include(completeprompt)) {
     const allwildcardslistnohybrid = [
       "-color-","-object-", "-animal-", "-fictional-","-nonfictional-","-building-","-vehicle-","-location-","-conceptprefix-","-food-","-haircolor-","-hairstyle-","-job-", "-accessory-", "-humanoid-", "-manwoman-", "-human-", "-colorscheme-", "-mood-", "-genderdescription-", "-artmovement-", "-malefemale-", "-bodytype-", "-minilocation-", "-minilocationaddition-", "-pose-", "-season-", "-minioutfit-", "-elaborateoutfit-", "-minivomit-", "-vomit-", "-rpgclass-", "-subjectfromfile-","-outfitfromfile-", "-brand-", "-space-", "-artist-", "-imagetype-", "-othertype-", "-quality-", "-lighting-", "-camera-", "-lens-","-imagetypequality-", "-poemline-", "-songline-", "-greatwork-", "-fantasyartist-", "-popularartist-", "-romanticismartist-", "-photographyartist-", "-emoji-", "-timeperiod-", "-shotsize-", "-musicgenre-", "-animaladdition-", "-addontolocationinside-", "-addontolocation-", "-objectaddition-", "-humanaddition-", "-overalladdition-", "-focus-", "-direction-", "-styletilora-", "-manwomanrelation-", "-waterlocation-", "-container-", "-firstname-", "-flora-", "-print-", "-miniactivity-", "-pattern-", "-animalsuffixaddition-", "-chair-", "-cardname-", "-covering-", "-heshe-", "-hisher-", "-himher-", "-outfitdescriptor-", "-hairdescriptor-", "-hairvomit-", "-humandescriptor-", "-manwomanmultiple-", "-facepart-", "-buildfacepart-", "-outfitvomit-", "-locationdescriptor-", "-basicbitchdescriptor-", "-animaldescriptor-", "-humanexpression-", "-humanvomit-", "-eyecolor-", "-fashiondesigner-", "-colorcombination-", "-materialcombination-", "-oppositefictional-", "-oppositenonfictional-", "-photoaddition-", "-age-", "-agecalculator-", "-gregmode-"
       ,"-portraitartist-", "-characterartist-" , "-landscapeartist-", "-scifiartist-", "-graphicdesignartist-", "-digitalartist-", "-architectartist-", "-cinemaartist-", "-setting-", "-charactertype-", "-objectstohold-", "-episodetitle-", "-token-", "-allstylessuffix-", "-fluff-", "-event-", "-background-"
       , "-occult-", "-locationfantasy-", "-locationscifi-", "-locationvideogame-", "-locationbiome-", "-locationcity-", "-bird-", "-cat-", "-dog-", "-insect-", "-pokemon-", "-pokemontype-", "-marinelife-"
     ]
+    if (!allwildcardlistloaded) {
+      await Promise.all([
+        csv_to_list("haircolors",antilist).then(arr => haircolorlist = arr.map(it => it.toString())),
+        csv_to_list_({csvfilename:"genderdescription",antilist,skipheader:true,gender}).then(arr => genderdescriptionlist = arr.map(it => it.toString())),
+        csv_to_list_({csvfilename:"malefemale",antilist,skipheader:true,gender}).then(arr => malefemalelist = arr.map(it => it.toString())),
+        csv_to_list("minilocations", antilist).then(arr => minilocationlist = arr.map(it => it.toString())),
+        csv_to_list("elaborateoutfits", antilist).then(arr => elaborateoutfitlist = arr.map(it => it.toString())),
+        csv_to_list("rpgclasses", antilist).then(arr => rpgclasslist = arr.map(it => it.toString())),
+        csv_to_list("custom_subjects",antilist,"/userfiles/").then(arr => customsubjectslist = arr.map(it => it.toString())),
+        csv_to_list("brands", antilist).then(arr => brandlist = arr.map(it => it.toString())),
+        csv_to_list("custom_outfits",antilist,"/userfiles/").then(arr => customoutfitslist = arr.map(it => it.toString())),
+        csv_to_list("waterlocations", antilist).then(arr => waterlocationlist = arr.map(it => it.toString())),
+        csv_to_list("prints", antilist).then(arr => printlist = arr.map(it => it.toString())),
+        csv_to_list("faceparts", antilist).then(arr => facepartlist = arr.map(it => it.toString())),
+        csv_to_list("miniactivity", antilist,"/csvfiles/special_lists/",0,"?").then(arr => miniactivitylist = arr.map(it => it.toString())),
+        csv_to_list("animalsuffixadditions", antilist,"/csvfiles/special_lists/",0,"?").then(arr => animalsuffixadditionlist = arr.map(it => it.toString())),
+      ])
+      await Promise.all([
+        csv_to_list("chairs", antilist).then(arr => chairlist = arr.map(it => it.toString())),
+        csv_to_list("coverings", antilist).then(arr => coveringlist = arr.map(it => it.toString())),
+        csv_to_list("hairvomit",antilist,"/csvfiles/",0,"?",false,false).then(arr => hairvomitlist = arr.map(it => it.toString())),
+        csv_to_list("buildfaceparts", antilist,"/csvfiles/special_lists/",0,"?").then(arr => buildfacepartlist = arr.map(it => it.toString())),
+        csv_to_list_({csvfilename:"outfitvomit",antilist,delimiter:"?"}).then(arr => outfitvomitlist = arr.map(it => it.toString())),
+        csv_to_list("eyecolors", antilist).then(arr => eyecolorlist = arr.map(it => it.toString())),
+        csv_to_list("fashiondesigners", antilist).then(arr => fashiondesignerlist = arr.map(it => it.toString())),
+        csv_to_list("colorcombinations", antilist).then(arr => colorcombinationlist = arr.map(it => it.toString())),
+        csv_to_list("materialcombinations", antilist).then(arr => materialcombinationlist = arr.map(it => it.toString())),
+        csv_to_list_({csvfilename:"fictional characters",antilist,skipheader:true,gender:oppositegender}).then(arr => oppositefictionallist = arr.map(it => it.toString())),
+        csv_to_list_({csvfilename:"nonfictional characters",antilist,skipheader:true,gender:oppositegender}).then(arr => oppositenonfictionallist = arr.map(it => it.toString())),
+        csv_to_list("ages", antilist).then(arr => agelist = arr.map(it => it.toString())),
+        csv_to_list("agecalculator", antilist).then(arr => agecalculatorlist = arr.map(it => it.toString())),
+        csv_to_list("settings", antilist).then(arr => settinglist = arr.map(it => it.toString())),
+        csv_to_list("charactertypes", antilist).then(arr => charactertypelist = arr.map(it => it.toString())),
+        csv_to_list("objectstohold", antilist).then(arr => objectstoholdlist = arr.map(it => it.toString())),
+        csv_to_list("backgrounds",antilist).then(arr => backgroundlist = arr.map(it => it.toString())),
+        csv_to_list("elements", antilist).then(arr => elementlist = arr.map(it => it.toString())),
+      ])
+      allwildcardlistloaded = true;
+    }
     const allwildcardslistnohybridlists = [
-      colorlist, objectlist, animallist, fictionallist, nonfictionallist, buildinglist, vehiclelist, locationlist,conceptprefixlist,foodlist,haircolorlist, hairstylelist,joblist, accessorielist, humanoidlist, manwomanlist, humanlist, colorschemelist, moodlist, genderdescriptionlist, artmovementlist, malefemalelist, bodytypelist, minilocationlist, minilocationadditionslist, poselist, seasonlist, minioutfitlist, elaborateoutfitlist, minivomitlist, vomitlist, rpgclasslist, customsubjectslist, customoutfitslist, brandlist, spacelist, artistlist, imagetypelist, othertypelist, qualitylist, lightinglist, cameralist, lenslist, imagetypequalitylist, poemlinelist, songlinelist, greatworklist, fantasyartistlist, popularartistlist, romanticismartistlist, photographyartistlist, emojilist, timeperiodlist, shotsizelist, musicgenrelist, animaladditionlist, addontolocationinsidelist, addontolocationlist, objectadditionslist, humanadditionlist, overalladditionlist, focuslist, directionlist, stylestiloralist, manwomanrelationlist, waterlocationlist, containerlist, firstnamelist, floralist, printlist, miniactivitylist, patternlist, animalsuffixadditionlist, chairlist, cardnamelist, coveringlist, heshelist, hisherlist, himherlist, outfitdescriptorlist, hairdescriptorlist, hairvomitlist, humandescriptorlist, manwomanmultiplelist, facepartlist, buildfacepartlist, outfitvomitlist, locationdescriptorlist, basicbitchdescriptorlist, animaldescriptorlist, humanexpressionlist, humanvomitlist, eyecolorlist, fashiondesignerlist, colorcombinationlist, materialcombinationlist, oppositefictionallist, oppositenonfictionallist, photoadditionlist, agelist, agecalculatorlist, gregmodelist
+      colorlist, objectlist, animallist, fictionallist, nonfictionallist, buildinglist, vehiclelist, locationlist,
+      conceptprefixlist,foodlist,haircolorlist, hairstylelist,joblist, accessorielist, humanoidlist, manwomanlist, humanlist, colorschemelist, moodlist, genderdescriptionlist,
+      artmovementlist, malefemalelist, bodytypelist, minilocationlist, minilocationadditionslist, poselist, seasonlist, minioutfitlist, elaborateoutfitlist, minivomitlist, vomitlist,
+      rpgclasslist, customsubjectslist, customoutfitslist, brandlist, spacelist, artistlist, imagetypelist, othertypelist, qualitylist, lightinglist, cameralist, lenslist, imagetypequalitylist, poemlinelist, songlinelist,
+      greatworklist, fantasyartistlist, popularartistlist, romanticismartistlist, photographyartistlist, emojilist, timeperiodlist, shotsizelist, musicgenrelist, animaladditionlist, addontolocationinsidelist, addontolocationlist, objectadditionslist, humanadditionlist,
+      overalladditionlist, focuslist, directionlist, stylestiloralist, manwomanrelationlist, waterlocationlist, containerlist, firstnamelist, floralist, printlist, miniactivitylist, patternlist, animalsuffixadditionlist, chairlist, cardnamelist, coveringlist, heshelist, hisherlist, himherlist,
+      outfitdescriptorlist, hairdescriptorlist, hairvomitlist, humandescriptorlist, manwomanmultiplelist, facepartlist, buildfacepartlist, outfitvomitlist, locationdescriptorlist, basicbitchdescriptorlist, animaldescriptorlist, humanexpressionlist, humanvomitlist, eyecolorlist,
+      fashiondesignerlist, colorcombinationlist, materialcombinationlist,
+      oppositefictionallist, oppositenonfictionallist, photoadditionlist, agelist, agecalculatorlist, gregmodelist
       , portraitartistlist, characterartistlist, landscapeartistlist, scifiartistlist, graphicdesignartistlist, digitalartistlist, architectartistlist, cinemaartistlist, settinglist, charactertypelist, objectstoholdlist, episodetitlelist, tokenlist, allstylessuffixlist, flufferlist, eventlist, backgroundlist
       , occultlist, locationfantasylist, locationscifilist, locationvideogamelist, locationbiomelist, locationcitylist, birdlist, catlist, doglist, insectlist, pokemonlist, pokemontypelist, marinelifelist
     ]
@@ -4928,8 +5053,11 @@ export async function build_dynamic_prompt(
   // OR(;foo;uncommon) --> empty unless it hits uncommon roll. Then take foo
   // OR(;foo;bar;uncommon) --> empty unless it hits uncommon roll. Then take foo or bar
 
+  customizedLogger('103-2', completeprompt);
 
   completeprompt = parse_custom_functions(completeprompt, insanitylevel)
+
+  customizedLogger('103-3', completeprompt);
 
   // prompt enhancer!
   if(!templatemode && !specialmode && base_model != "Stable Cascade") {
@@ -4943,6 +5071,8 @@ export async function build_dynamic_prompt(
       completeprompt = completeprompt.replaceAll("-tempnewwords-", enhance_positive_words)
     }
   }
+
+  customizedLogger('103-4', completeprompt);
 
   completeprompt = completeprompt.replaceAll("-tempnewwords-", "")
 
@@ -4991,9 +5121,14 @@ export async function build_dynamic_prompt(
   //just for me, some fun with posting fake dev messages (ala old sim games)
   if(randint(1, 50) == 1) {
     console.log("")
-    console.log(randomChoice(devmessagelist))
+    // console.log(randomChoice(devmessagelist))
     console.log("")
   }
+
+  customizedLogger('108-1', completeprompt);
+
+  const commaSplits = completeprompt.split(',').map(it => it.trim()).filter(it => it.length > 0)
+  completeprompt = commaSplits.join(", ")
 
   console.log(completeprompt) // keep this! :D 
 
@@ -5002,4 +5137,12 @@ export async function build_dynamic_prompt(
   else
     return { completeprompt, prompt_g, prompt_l }
 
+}
+
+self.onmessage = () => {
+  build_dynamic_prompt().then((result) => {
+    postMessage(result)
+  }).catch((err) => {
+    console.error(err)
+  })
 }

@@ -15,19 +15,16 @@ export function uncommon_dist(insanitylevel: number) {
 
 function parseLine (text: string, delimiter = ',') {
   if (!text.includes('"')) return text.split(delimiter);
-  const ret = [];
-  let tmp = ''
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '"') {
-      continue;
-    } else if (text[i] === delimiter) {
-      ret.push(tmp);
-      tmp = '';
-    } else
-      tmp += text[i];
+  let replaced = text;
+  let cnt = text.indexOf('"');
+  while (cnt >= 0) {
+    const end = text.indexOf('"', cnt + 1)
+    let seg = text.slice(cnt, end).replaceAll(delimiter, '^')
+    replaced = replaced.substring(0, cnt) + seg + replaced.substring(end + 1)
+    cnt = text.indexOf('"', end + 1)
   }
-  ret.push(tmp);
-  return ret;
+
+  return replaced.split(delimiter).map(it => it.replaceAll('^', delimiter));
 }
 
 export async function artist_descriptions_csv_to_list(csvfilename: string) {
@@ -277,4 +274,50 @@ export function shuffle(array: any[]) {
     [array[currentIndex], array[randomIndex]] = [
       array[randomIndex], array[currentIndex]];
   }
+}
+
+export async function artist_style_cols() {
+  const fantasyartistlist = [], popularartistlist = [], romanticismartistlist = [], photographyartistlist = [], portraitartistlist = [], characterartistlist = [],
+  landscapeartistlist = [], scifiartistlist = [],  graphicdesignartistlist = [], digitalartistlist = [], architectartistlist = [],
+  cinemaartistlist = [];
+  const full_path = "/csvfiles/";
+  const content = await readTextFile(full_path + "artists_and_category" + ".csv");
+  const [ header, ...lines ] = content?.split('\n') ?? [];
+
+  if (header && lines.length) {
+    const headerCols = header.split(',');
+    for (const line of lines) {
+      const cols = parseLine(line);
+      const obj: Record<string, string> = {};
+      for (let i = 0; i < cols.length; i++) {
+        obj[headerCols[i]] = cols[i];
+      }
+      if (obj["fantasy"] == "") fantasyartistlist.push(obj["Artist"]);
+      if (obj["popular"] == "1") popularartistlist.push(obj["Artist"]);
+      if (obj["romanticism"] == "1") romanticismartistlist.push(obj["Artist"]);
+      if (obj["photography"] == "1") photographyartistlist.push(obj["Artist"]);
+      if (obj["portrait"] == "1") portraitartistlist.push(obj["Artist"]);
+      if (obj["character"] == "1") characterartistlist.push(obj["Artist"]);
+      if (obj["landscape"] == "1") landscapeartistlist.push(obj["Artist"]);
+      if (obj["sci-fi"] == "1") scifiartistlist.push(obj["Artist"]);
+      if (obj["graphic design"] == "1") graphicdesignartistlist.push(obj["Artist"]);
+      if (obj["digital"] == "1") digitalartistlist.push(obj["Artist"]);
+      if (obj["architecture"] == "1") architectartistlist.push(obj["Artist"]);
+      if (obj["cinema"] == "1") cinemaartistlist.push(obj["Artist"]);
+    }
+  }
+  return {
+    fantasyartistlist,
+    popularartistlist,
+    romanticismartistlist,
+    photographyartistlist,
+    portraitartistlist,
+    characterartistlist,
+    landscapeartistlist,
+    scifiartistlist,
+    graphicdesignartistlist,
+    digitalartistlist,
+    architectartistlist,
+    cinemaartistlist
+  };
 }

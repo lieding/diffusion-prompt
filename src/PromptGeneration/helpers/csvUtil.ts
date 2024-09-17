@@ -115,13 +115,17 @@ export async function csv_to_list(
 
   // return empty list if we can't find the file. Build for antilist.csv
   let content = await readTextFile(directory + csvfilename + ".csv");
-  if (content)
-    csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
+  if (content) {
+    const l = readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip);
+    csvlist = csvlist.concat(l);
+  }
   // dirty hack for possible .txt files
   else {
     content = await readTextFile(directory + csvfilename + ".txt");
-    if (content)
-      csvlist.push(...readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip));
+    if (content) {
+      const l = readContent(content, skipheader, listoflistmode, delimiter, gender, antilist, lowerandstrip);
+      csvlist = csvlist.concat(l);
+    }
   }
 
   // do the add ons!

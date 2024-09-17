@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"></html>
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="/favicon.ico" />
@@ -27,7 +27,6 @@
     <title>TFJS to scan image</title>
   </head>
   <body>
-    <button id="start">Start</button>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
     <!--
@@ -40,12 +39,6 @@
       To begin the development, run `npm start` or `yarn start`.
       To create a production bundle, use `npm run build` or `yarn build`.
     -->
-    <!-- <script type="module" src="index.tsx"></script> -->
-    
-    <script>
-      document.getElementById('start').addEventListener('click', () => {
-        let childWindow = window.open('/src/PromptGeneration/promptGeneration.html', "popup", "width=600,height=400");
-      })
-    </script>
+    <script type="module" src="/src/PromptGeneration/promptGeneration.ts"></script>
   </body>
 </html>

@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { resolve } from 'path';
 import { defineConfig } from "vite";
 
 export default defineConfig((configEnv) => {
@@ -7,7 +8,7 @@ export default defineConfig((configEnv) => {
 	return {
 		plugins: [react()],
 		server: {
-			open: './src/index.html',
+			// open: './src/index.html',
 		},
 		css: {
 			modules: {
@@ -16,9 +17,11 @@ export default defineConfig((configEnv) => {
 		},
 		build: {
 			modulePreload: false,
+			cssCodeSplit: true,
 			rollupOptions: {
 				input: {
-					app: './src/index.html'
+					index: resolve(__dirname, 'src/index.html'),
+					promptGeneration: resolve(__dirname, 'src/PromptGeneration/promptGeneration.html'),
 				}
 			}
 		}
