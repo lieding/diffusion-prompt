@@ -877,8 +877,8 @@ async function one_button_superprompt(insanitylevel = 5, prompt = "", seed = -1,
   const load_model_promise = loadSuperpromptV1Model()
 
   const superprompterstyleslist = await csv_to_list("superprompter_styles")
-  const descriptorlist = await csv_to_list("descriptors")
-  const devmessagessuperpromptlist = await csv_to_list("devmessages_superprompt")
+  // const descriptorlist = await csv_to_list("descriptors")
+  // const devmessagessuperpromptlist = await csv_to_list("devmessages_superprompt")
 
   let usestyle = false
   if(superpromptstyle != "" && superpromptstyle != "all")
@@ -1106,7 +1106,7 @@ async function one_button_superprompt(insanitylevel = 5, prompt = "", seed = -1,
         top_p -= 0.3
       max_new_tokens += 3
       console.log("")
-      console.log(randomChoice(devmessagessuperpromptlist) + "... Retrying...")
+      console.log("... Retrying...")
       console.log("")
     }
   }
@@ -5139,10 +5139,79 @@ async function build_dynamic_prompt(
 
 }
 
-self.onmessage = () => {
-  build_dynamic_prompt().then((result) => {
+function generatePromptArgs (obj: Record<string, string | number>) {
+  const defaultArgs = {
+    insanitylevel: 5,
+    forcesubject: "all",
+    artists: "all",
+    imagetype: "all",
+    onlyartists: false,
+    antivalues: "",
+    prefixprompt: "",
+    suffixprompt:"",
+    promptcompounderlevel:"1",
+    seperator: "comma",
+    givensubject:"",
+    smartsubject: true,
+    giventypeofimage:"",
+    imagemodechance: 20,
+    gender: "all",
+    subtypeobject:"all",
+    subtypehumanoid:"all",
+    subtypeconcept:"all",
+    advancedprompting:true,
+    hardturnoffemojis:false,
+    seed:-1,
+    overrideoutfit:"",
+    prompt_g_and_l: false,
+    base_model: "SD1.5",
+    OBP_preset: "",
+    prompt_enhancer: "none",
+    subtypeanimal:"all",
+    subtypelocation:"all",
+    preset_prefix: "",
+    preset_suffix: ""
+  };
+  return { ...defaultArgs, ...obj };
+}
+
+self.onmessage = (ev: MessageEvent) => {
+  const data = JSON.parse(ev.data?.toString() ?? '{}');
+  const args = generatePromptArgs(data);
+  build_dynamic_prompt(
+    args.insanitylevel,
+    args.forcesubject,
+    args.artists,
+    args.imagetype,
+    args.onlyartists,
+    args.antivalues,
+    args.prefixprompt,
+    args.suffixprompt,
+    args.promptcompounderlevel,
+    args.seperator,
+    args.givensubject,
+    args.smartsubject,
+    args.giventypeofimage,
+    args.imagemodechance,
+    args.gender,
+    args.subtypeobject,
+    args.subtypehumanoid,
+    args.subtypeconcept,
+    args.advancedprompting,
+    args.hardturnoffemojis,
+    args.seed,
+    args.overrideoutfit,
+    args.prompt_g_and_l,
+    args.base_model,
+    args.OBP_preset,
+    args.prompt_enhancer,
+    args.subtypeanimal,
+    args.subtypelocation,
+    args.preset_prefix,
+    args.preset_suffix
+  ).then((result) => {
     postMessage(result)
   }).catch((err) => {
     console.error(err)
-  })
+  });
 }

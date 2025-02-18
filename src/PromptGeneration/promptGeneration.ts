@@ -2,7 +2,7 @@ import PromptGenerationWorker from './buildDynamicPrompt?worker&inline'
 
 const worker = new PromptGenerationWorker()
 
-worker.postMessage('  ')
+worker.postMessage(JSON.stringify({}))
 
 const closeTimeout = setTimeout(() => {
   worker.terminate();
